@@ -25,6 +25,7 @@ fn vllm_basic_shape_matches_rust_contract() {
         Parallelism::single(2),
         None,
         None,
+        None,
     );
 
     assert!(cmd.contains("vllm serve meta-llama/Llama-3.3-70B"));
@@ -41,6 +42,7 @@ fn vllm_trust_remote_code_heuristic_matches_rust_contract() {
         Parallelism::single(2),
         None,
         None,
+        None,
     );
     let deepseek = generate_vllm_command(
         "deepseek-ai/DeepSeek-V4-Flash",
@@ -48,11 +50,13 @@ fn vllm_trust_remote_code_heuristic_matches_rust_contract() {
         Parallelism::single(8),
         None,
         None,
+        None,
     );
     let qwen36 = generate_vllm_command(
         "Qwen/Qwen3.6-35B-A3B",
         &profile("qwen3_5_moe_text", Some(262_144)),
         Parallelism::single(1),
+        None,
         None,
         None,
     );
@@ -72,10 +76,26 @@ fn vllm_max_model_len_override_matches_rust_contract() {
         Parallelism::single(2),
         None,
         Some(32_768),
+        None,
     );
 
     assert!(cmd.contains("--max-model-len 32768"));
     assert!(!cmd.contains("--max-model-len 131072"));
+}
+
+#[test]
+fn vllm_concurrency_limit_uses_max_num_seqs() {
+    let cmd = generate_vllm_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(8),
+        None,
+        Some(262_144),
+        Some(12),
+    );
+
+    assert!(cmd.contains("--max-model-len 262144"));
+    assert!(cmd.contains("--max-num-seqs 12"));
 }
 
 #[test]
@@ -96,6 +116,7 @@ fn vllm_entry_flags_are_appended_verbatim() {
         Parallelism::single(8),
         Some(&entry),
         None,
+        None,
     );
 
     assert!(cmd.contains("--attention-backend auto"));
@@ -107,6 +128,7 @@ fn sglang_basic_shape_matches_rust_contract() {
         "deepseek-ai/DeepSeek-V3.2",
         &profile("deepseek_v3_2", Some(131_072)),
         Parallelism::single(8),
+        None,
         None,
         None,
     );
@@ -135,9 +157,25 @@ fn sglang_entry_required_flags_are_appended_verbatim() {
         Parallelism::single(8),
         Some(&entry),
         None,
+        None,
     );
 
     assert!(cmd.contains("--attention-backend nsa"));
+}
+
+#[test]
+fn sglang_concurrency_limit_uses_max_running_requests() {
+    let cmd = generate_sglang_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(8),
+        None,
+        Some(262_144),
+        Some(12),
+    );
+
+    assert!(cmd.contains("--context-length 262144"));
+    assert!(cmd.contains("--max-running-requests 12"));
 }
 
 #[test]
@@ -152,6 +190,7 @@ fn vllm_multinode_command_uses_tp_per_node_and_pp_nodes() {
         },
         None,
         Some(1_048_576),
+        None,
     );
 
     assert!(cmd.contains("--tensor-parallel-size 8"));
@@ -171,6 +210,7 @@ fn sglang_multinode_command_uses_total_tp_and_node_bootstrap_flags() {
         },
         None,
         Some(1_048_576),
+        None,
     );
 
     assert!(cmd.contains("--tp 16"));

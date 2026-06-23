@@ -1,7 +1,7 @@
 pub mod sglang;
 pub mod vllm;
 
-use crate::engine_compat::EngineFlag;
+use crate::engine_compat::{EngineCompatEntry, EngineFlag};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Parallelism {
@@ -29,6 +29,16 @@ fn render_flag(flag: &EngineFlag) -> String {
         Some(value) => format!("{} {}", flag.flag, value),
         None => flag.flag.clone(),
     }
+}
+
+fn entry_has_flag(entry: Option<&EngineCompatEntry>, flag: &str) -> bool {
+    entry.is_some_and(|entry| {
+        entry
+            .required_flags
+            .iter()
+            .chain(entry.optional_flags.iter())
+            .any(|engine_flag| engine_flag.flag == flag)
+    })
 }
 
 fn needs_trust_remote_code(model_type: &str) -> bool {

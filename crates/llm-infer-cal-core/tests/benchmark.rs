@@ -90,6 +90,7 @@ fn prod_fleet(gpu_count: u64) -> FleetRecommendation {
             node_count: 1,
             weight_bytes_per_gpu: 1,
             kv_bytes_per_request: 1,
+            kv_reference_context_tokens: 131_072,
             max_concurrent_at_reference_ctx: 1,
             max_concurrent_by_context: Vec::new(),
             usable_bytes_per_gpu: 1,

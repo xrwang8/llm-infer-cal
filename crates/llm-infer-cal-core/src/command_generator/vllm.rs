@@ -1,5 +1,5 @@
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::{needs_trust_remote_code, render_flag, Parallelism};
+use crate::command_generator::{entry_has_flag, needs_trust_remote_code, render_flag, Parallelism};
 use crate::engine_compat::EngineCompatEntry;
 
 pub fn generate_vllm_command(
@@ -8,6 +8,7 @@ pub fn generate_vllm_command(
     parallelism: Parallelism,
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
+    max_concurrent_requests: Option<u64>,
 ) -> String {
     let mut lines = vec![
         format!("vllm serve {model_id}"),
@@ -32,6 +33,12 @@ pub fn generate_vllm_command(
     });
     if let Some(max) = effective_max {
         lines.push(format!("  --max-model-len {max}"));
+    }
+
+    if let Some(max_concurrent) = max_concurrent_requests.filter(|value| *value > 0) {
+        if !entry_has_flag(entry, "--max-num-seqs") {
+            lines.push(format!("  --max-num-seqs {max_concurrent}"));
+        }
     }
 
     if needs_trust_remote_code(&profile.model_type) {

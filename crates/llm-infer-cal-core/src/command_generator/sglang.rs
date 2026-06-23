@@ -1,5 +1,5 @@
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::{needs_trust_remote_code, render_flag, Parallelism};
+use crate::command_generator::{entry_has_flag, needs_trust_remote_code, render_flag, Parallelism};
 use crate::engine_compat::EngineCompatEntry;
 
 pub fn generate_sglang_command(
@@ -8,6 +8,7 @@ pub fn generate_sglang_command(
     parallelism: Parallelism,
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
+    max_concurrent_requests: Option<u64>,
 ) -> String {
     let launch = match entry {
         Some(entry) if !entry.env.is_empty() => {
@@ -42,6 +43,12 @@ pub fn generate_sglang_command(
         lines.push(format!("  --context-length {max}"));
     }
 
+    if let Some(max_concurrent) = max_concurrent_requests.filter(|value| *value > 0) {
+        if !entry_has_flag(entry, "--max-running-requests") {
+            lines.push(format!("  --max-running-requests {max_concurrent}"));
+        }
+    }
+
     if needs_trust_remote_code(&profile.model_type) {
         lines.push("  --trust-remote-code".to_string());
     }
@@ -60,14 +67,4 @@ pub fn generate_sglang_command(
     }
 
     lines.join(" \\\n")
-}
-
-fn entry_has_flag(entry: Option<&EngineCompatEntry>, flag: &str) -> bool {
-    entry.is_some_and(|entry| {
-        entry
-            .required_flags
-            .iter()
-            .chain(entry.optional_flags.iter())
-            .any(|engine_flag| engine_flag.flag == flag)
-    })
 }

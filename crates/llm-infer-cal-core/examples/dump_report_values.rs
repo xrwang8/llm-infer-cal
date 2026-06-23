@@ -241,6 +241,7 @@ fn fleet(fleet: &FleetRecommendation) -> Value {
             "gpu_count": option.gpu_count,
             "weight_bytes_per_gpu": option.weight_bytes_per_gpu,
             "kv_bytes_per_request": option.kv_bytes_per_request,
+            "kv_reference_context_tokens": option.kv_reference_context_tokens,
             "max_concurrent_at_reference_ctx": option.max_concurrent_at_reference_ctx,
             "max_concurrent_by_context": option.max_concurrent_by_context.iter()
                 .map(|(ctx, value)| json!([ctx, value]))

@@ -2,7 +2,6 @@ use crate::architecture::profile::{ArchitectureProfile, AttentionVariant};
 use crate::hardware::loader::GPUSpec;
 
 const OVERHEAD_FRACTION: f64 = 0.10;
-const REFERENCE_CTX_TOKENS: u64 = 131_072;
 const MAX_TP_SINGLE_NODE: u64 = 8;
 const MAX_PIPELINE_PARALLEL: u64 = 8;
 
@@ -15,6 +14,7 @@ pub struct FleetOption {
     pub node_count: u64,
     pub weight_bytes_per_gpu: u64,
     pub kv_bytes_per_request: u64,
+    pub kv_reference_context_tokens: u64,
     pub max_concurrent_at_reference_ctx: u64,
     pub max_concurrent_by_context: Vec<(u64, u64)>,
     pub usable_bytes_per_gpu: u64,
@@ -45,6 +45,7 @@ struct EvalContext<'a> {
     profile: &'a ArchitectureProfile,
     weight_bytes: u64,
     kv_bytes: u64,
+    reference_context_tokens: u64,
     usable_per_gpu: u64,
     valid_tp: &'a [u64],
     candidates: &'a [u64],
@@ -55,6 +56,7 @@ pub fn plan(
     profile: &ArchitectureProfile,
     weight_bytes: u64,
     kv_bytes_per_request_at_ref: u64,
+    reference_context_tokens: u64,
     gpu: &GPUSpec,
     forced_gpu_count: Option<u64>,
     kv_bytes_by_context: &[(u64, u64)],
@@ -69,6 +71,7 @@ pub fn plan(
         profile,
         weight_bytes,
         kv_bytes: kv_bytes_per_request_at_ref,
+        reference_context_tokens,
         usable_per_gpu,
         valid_tp: &valid_tp,
         candidates: &candidates,
@@ -287,12 +290,12 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     } else {
         (
             format!(
-                "fits ~{max_concurrent} concurrent @ {}K ctx ({layout_en})",
-                REFERENCE_CTX_TOKENS / 1024
+                "fits ~{max_concurrent} concurrent @ {} ctx ({layout_en})",
+                fmt_context(eval.reference_context_tokens)
             ),
             format!(
-                "可容纳约 {max_concurrent} 并发请求 @ {}K 上下文（{layout_zh}）",
-                REFERENCE_CTX_TOKENS / 1024
+                "可容纳约 {max_concurrent} 并发请求 @ {} 上下文（{layout_zh}）",
+                fmt_context(eval.reference_context_tokens)
             ),
         )
     };
@@ -305,6 +308,7 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         node_count,
         weight_bytes_per_gpu: weight_per_gpu,
         kv_bytes_per_request: eval.kv_bytes,
+        kv_reference_context_tokens: eval.reference_context_tokens,
         max_concurrent_at_reference_ctx: max_concurrent,
         max_concurrent_by_context,
         usable_bytes_per_gpu: eval.usable_per_gpu,
@@ -312,6 +316,19 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         reason_en,
         reason_zh,
     }
+}
+
+fn fmt_context(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        if tokens % 1_000_000 == 0 {
+            return format!("{}M", tokens / 1_000_000);
+        }
+        return format!("{:.1}M", tokens as f64 / 1_000_000.0);
+    }
+    if tokens >= 1024 {
+        return format!("{}K", tokens / 1024);
+    }
+    tokens.to_string()
 }
 
 fn constraint_note_en(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String {

@@ -156,7 +156,14 @@ impl Evaluator {
         let mut generated_command = None;
         if let Some(spec) = &gpu_spec {
             if weight.total_bytes.value > 0 {
-                let kv_ref = compute_kv_cache_bytes(&profile, KV_REFERENCE_CTX, 2);
+                let (reference_ctx, kv_ref_bytes) = reference_context_bytes(&kv_cache_by_context)
+                    .unwrap_or_else(|| {
+                        let fallback_ctx = model_max_context(&profile).unwrap_or(KV_REFERENCE_CTX);
+                        (
+                            fallback_ctx,
+                            compute_kv_cache_bytes(&profile, fallback_ctx, 2).value,
+                        )
+                    });
                 let kv_by_context_bytes = kv_cache_by_context
                     .iter()
                     .filter_map(|(ctx, value)| (value.value > 0).then_some((*ctx, value.value)))
@@ -164,7 +171,8 @@ impl Evaluator {
                 let recommendation = plan(
                     &profile,
                     weight.total_bytes.value,
-                    kv_ref.value.max(1),
+                    kv_ref_bytes.max(1),
+                    reference_ctx,
                     spec,
                     options.gpu_count,
                     &kv_by_context_bytes,
@@ -177,6 +185,8 @@ impl Evaluator {
                         chosen_option,
                         engine_match.as_ref(),
                         options.context_length,
+                        (chosen_option.max_concurrent_at_reference_ctx > 0)
+                            .then_some(chosen_option.max_concurrent_at_reference_ctx),
                     ));
                 }
                 fleet = Some(recommendation);
@@ -337,25 +347,27 @@ fn select_context_lengths(profile: &ArchitectureProfile, override_ctx: Option<u6
     }
 
     let mut candidates = vec![4_096, 32_768, KV_REFERENCE_CTX];
-    let max_pos = profile
-        .position
-        .as_ref()
-        .and_then(|position| position.max_position_embeddings);
+    let max_pos = model_max_context(profile);
     if let Some(max_pos) = max_pos {
-        if max_pos > KV_REFERENCE_CTX {
-            candidates.push(max_pos);
-        }
+        candidates.push(max_pos);
         candidates.retain(|ctx| *ctx <= max_pos);
     }
+    candidates.sort_unstable();
+    candidates.dedup();
     candidates
+}
+
+fn model_max_context(profile: &ArchitectureProfile) -> Option<u64> {
+    profile
+        .position
+        .as_ref()
+        .and_then(|position| position.max_position_embeddings)
+        .filter(|max_pos| *max_pos > 0)
 }
 
 fn reference_context_bytes(
     kv_cache_by_context: &BTreeMap<u64, AnnotatedValue<u64>>,
 ) -> Option<(u64, u64)> {
-    if let Some(value) = kv_cache_by_context.get(&KV_REFERENCE_CTX) {
-        return Some((KV_REFERENCE_CTX, value.value));
-    }
     kv_cache_by_context
         .iter()
         .next_back()
@@ -369,15 +381,33 @@ fn generate_command(
     option: &FleetOption,
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
+    max_concurrent_requests: Option<u64>,
 ) -> String {
     let parallelism = Parallelism {
         total_gpus: option.gpu_count,
         tensor_parallel_size: option.tensor_parallel_size,
         pipeline_parallel_size: option.pipeline_parallel_size,
     };
+    let max_model_len = max_model_len
+        .or_else(|| model_max_context(profile))
+        .or(Some(option.kv_reference_context_tokens));
     if engine.trim().eq_ignore_ascii_case("sglang") {
-        generate_sglang_command(model_id, profile, parallelism, entry, max_model_len)
+        generate_sglang_command(
+            model_id,
+            profile,
+            parallelism,
+            entry,
+            max_model_len,
+            max_concurrent_requests,
+        )
     } else {
-        generate_vllm_command(model_id, profile, parallelism, entry, max_model_len)
+        generate_vllm_command(
+            model_id,
+            profile,
+            parallelism,
+            entry,
+            max_model_len,
+            max_concurrent_requests,
+        )
     }
 }

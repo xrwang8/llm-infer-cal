@@ -156,6 +156,38 @@ fn evaluate_composes_rust_pipeline_for_known_gpu() {
 }
 
 #[test]
+fn evaluate_uses_model_max_context_instead_of_fixed_reference_context() {
+    let report = evaluator()
+        .evaluate(
+            "test/llama-mini",
+            "H800",
+            "vllm",
+            EvaluationOptions::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        report
+            .kv_cache_by_context
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![4096, 8192]
+    );
+
+    let fleet = report.fleet.as_ref().unwrap();
+    for option in &fleet.options {
+        assert!(option
+            .max_concurrent_by_context
+            .iter()
+            .all(|(ctx, _)| *ctx <= 8192));
+        assert_eq!(option.kv_reference_context_tokens, 8192);
+        assert!(!option.reason_en.contains("128K"));
+        assert!(!option.reason_zh.contains("128K"));
+    }
+}
+
+#[test]
 fn evaluate_embeds_unknown_gpu_error_without_aborting() {
     let report = evaluator()
         .evaluate(

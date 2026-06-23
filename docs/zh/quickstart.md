@@ -11,7 +11,7 @@ llm-infer-cal deepseek-ai/DeepSeek-V4-Flash --gpu H800 --engine vllm --lang zh
 1. **架构识别** — 检测到 DeepSeek-V4，CSA+HCA + MoE + 滑动窗口，`置信度：high`
 2. **权重** — `safetensors 总字节：159.62 GB [已验证]`、`量化方案推断：FP4_FP8_MIXED [推断]`
 3. **对账** — 每种量化方案预测字节对比。FP4_FP8_MIXED 胜出（0.2% 误差），FP8 差 45.1%
-4. **KV Cache** — 4K / 32K / 128K / 1M 四个上下文长度的估算
+4. **KV Cache** — 根据模型真实最大上下文裁剪估算点；能识别最大上下文时会追加该真实最大值
 5. **引擎兼容性** — vLLM ≥0.19.0，`[引用]` 带来源 URL
 6. **目标硬件** — H800 规格，双语备注
 7. **推荐 GPU 张数** — min / dev / prod 三档，含 TP 感知的 KV 分摊
@@ -62,7 +62,7 @@ llm-infer-cal Qwen/Qwen2.5-7B-Instruct --gpu 摩尔线程S4000 --engine vllm --l
 |---|---|---|
 | `[已验证]` | 从 API / 文件直接读取 | `safetensors 总字节：159.62 GB`（HF siblings API） |
 | `[推断]` | 基于已验证数据的单步推导 | `每参数位数：4.39`（字节 ÷ 参数数） |
-| `[估算]` | 基于公式的计算 | `KV cache @ 128K：2.21 GB` |
+| `[估算]` | 基于公式的计算 | `KV cache @ 模型最大上下文：21.47 GB` |
 | `[引用]` | 外部来源（release note / PR） | `vLLM ≥0.19.0 支持 CSA+HCA` |
 | `[未经验证]` | 矩阵条目但无证据，显式标出 | `SGLang Day-0 支持待定` |
 | `[未知]` | 无法识别，graceful 降级 | 新模型类型未在注册表中 |

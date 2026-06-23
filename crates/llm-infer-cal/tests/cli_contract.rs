@@ -171,6 +171,8 @@ fn builtin_qwen36_model_renders_zh_report_without_network() {
     assert!(exit.stdout.contains("safetensors 总字节: 71.90 GB"));
     assert!(exit.stdout.contains("量化方案推断: BF16 [已验证]"));
     assert!(exit.stdout.contains("生成的启动命令"));
+    assert!(exit.stdout.contains("--max-model-len 262144"));
+    assert!(exit.stdout.contains("--max-num-seqs 12"));
     assert!(exit.stdout.contains("--trust-remote-code"));
     assert!(exit.stdout.contains("--enable-auto-tool-choice"));
     assert!(exit.stdout.contains("--tool-call-parser qwen3_xml"));
@@ -202,6 +204,8 @@ fn builtin_qwen36_sglang_command_includes_recipe_flags() {
         .contains("SGLANG_ENABLE_SPEC_V2=1 python -m sglang.launch_server"));
     assert!(exit.stdout.contains("--reasoning-parser qwen3"));
     assert!(exit.stdout.contains("--tool-call-parser qwen3_coder"));
+    assert!(exit.stdout.contains("--context-length 262144"));
+    assert!(exit.stdout.contains("--max-running-requests 12"));
     assert!(exit.stdout.contains("--speculative-algorithm EAGLE"));
     assert!(exit.stdout.contains("--speculative-num-steps 3"));
     assert!(exit.stdout.contains("--speculative-eagle-topk 1"));
@@ -250,11 +254,19 @@ fn builtin_qwen36_can_render_machine_readable_json() {
     assert_eq!(json["weights"]["quantization_guess"]["value"], "BF16");
     assert_eq!(json["hardware"]["id"], "H100");
     assert_eq!(json["fleet"]["best_tier"], "dev");
-    assert_eq!(json["performance"]["max_concurrent"]["value"], 10);
+    assert_eq!(
+        json["fleet"]["options"][1]["kv_reference_context_tokens"],
+        262_144
+    );
+    assert_eq!(json["performance"]["max_concurrent"]["value"], 12);
     assert!(json["generated_command"]["command"]
         .as_str()
         .unwrap()
         .contains("--reasoning-parser qwen3"));
+    assert!(json["generated_command"]["command"]
+        .as_str()
+        .unwrap()
+        .contains("--max-num-seqs 12"));
     assert_eq!(
         json["generated_command"]["lines"][0],
         "vllm serve Qwen/Qwen3.6-35B-A3B"
@@ -284,8 +296,8 @@ fn builtin_glm52_model_renders_zh_report_and_json_without_network() {
     assert!(text.stdout.contains("ZhipuAI/GLM-5.2  来源 builtin"));
     assert!(text.stdout.contains("模型类型: glm_moe_dsa"));
     assert!(text.stdout.contains("safetensors 总字节: 1506.67 GB"));
-    assert!(text.stdout.contains("最小: 24 GPUs"));
-    assert!(text.stdout.contains("开发 *: 48 GPUs"));
+    assert!(text.stdout.contains("最小 *: 48 GPUs"));
+    assert!(text.stdout.contains("并发 @ 1.0M ~2"));
     assert!(!text.stdout.contains("数据源不可用"));
 
     let json_exit = run_cli([
@@ -311,7 +323,11 @@ fn builtin_glm52_model_renders_zh_report_and_json_without_network() {
         json["weights"]["safetensors_total_bytes"]["value"],
         1_506_667_387_408_u64
     );
-    assert_eq!(json["fleet"]["best_tier"], "dev");
+    assert_eq!(json["fleet"]["best_tier"], "min");
+    assert_eq!(
+        json["fleet"]["options"][0]["kv_reference_context_tokens"],
+        1_048_576
+    );
     assert_eq!(json["generated_command"]["gpu_count"], 48);
     assert_eq!(json["generated_command"]["tensor_parallel_size"], 8);
     assert_eq!(json["generated_command"]["pipeline_parallel_size"], 6);

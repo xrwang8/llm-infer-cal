@@ -11,7 +11,7 @@ This is the tool's reference case. You get back:
 1. **Architecture profile** — DeepSeek-V4 detected, CSA+HCA + MoE + sliding window, `confidence: high`.
 2. **Weights** — `safetensors bytes: 159.62 GB [verified]`, `quantization guess: FP4_FP8_MIXED [inferred]`.
 3. **Reconciliation** — predicted bytes under each quantization scheme. FP4_FP8_MIXED wins at 0.2% error; FP8 is off by 45.1%.
-4. **KV cache** — 4K / 32K / 128K / 1M context length estimates.
+4. **KV cache** — context estimates are clipped to the model's real max context and include that max context when known.
 5. **Engine compatibility** — vLLM ≥0.19.0, `[cited]` with source URLs.
 6. **Target hardware** — H800 spec with bilingual notes.
 7. **Recommended fleet** — min / dev / prod tiers with TP-aware KV sharding.
@@ -62,7 +62,7 @@ Every number in the report is tagged:
 |---|---|---|
 | `[verified]` | Direct read from API or file | `safetensors bytes: 159.62 GB` (HF siblings API) |
 | `[inferred]` | One-step derivation from verified data | `bits/param: 4.39` (bytes ÷ params) |
-| `[estimated]` | Formula-based computation | `KV cache @ 128K: 2.21 GB` |
+| `[estimated]` | Formula-based computation | `KV cache @ model max context: 21.47 GB` |
 | `[cited]` | External source (release note / PR) | `vLLM ≥0.19.0 supports CSA+HCA` |
 | `[unverified]` | Matrix entry without evidence — flagged | `SGLang day-0 support pending` |
 | `[unknown]` | Couldn't identify, graceful degrade | New model type not in registry |

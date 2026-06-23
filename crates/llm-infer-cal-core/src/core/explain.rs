@@ -280,6 +280,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
         };
         let effective_shards = effective_kv_shards(&report.profile, opt.gpu_count);
         let kv_per_gpu = ceil_div(opt.kv_bytes_per_request, effective_shards.max(1));
+        let reference_ctx = fmt_context(opt.kv_reference_context_tokens);
         let mut steps = vec![
             format!(
                 "per-GPU HBM usable (@ 90% util) = {} bytes",
@@ -293,7 +294,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
                 fmt_u64(opt.weight_bytes_per_gpu)
             ),
             format!(
-                "per-GPU KV @ 128K = total_KV / effective_kv_shards = {} / {} = {} bytes",
+                "per-GPU KV @ {reference_ctx} = total_KV / effective_kv_shards = {} / {} = {} bytes",
                 fmt_u64(opt.kv_bytes_per_request),
                 effective_shards,
                 fmt_u64(kv_per_gpu)
@@ -303,7 +304,9 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
                 fmt_u64(headroom),
                 headroom as f64 / 1e9
             ),
-            format!("tier criterion: headroom >= {fit_criterion} x per_gpu_kv_per_request_128K"),
+            format!(
+                "tier criterion: headroom >= {fit_criterion} x per_gpu_kv_per_request_at_{reference_ctx}"
+            ),
             format!(
                 "selected smallest candidate satisfying the criterion: {} GPUs ({layout})",
                 opt.gpu_count
@@ -646,6 +649,19 @@ fn fmt_u64(value: u64) -> String {
         out.push(ch);
     }
     out
+}
+
+fn fmt_context(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        if tokens % 1_000_000 == 0 {
+            return format!("{}M", tokens / 1_000_000);
+        }
+        return format!("{:.1}M", tokens as f64 / 1_000_000.0);
+    }
+    if tokens >= 1024 {
+        return format!("{}K", tokens / 1024);
+    }
+    tokens.to_string()
 }
 
 #[allow(dead_code)]
