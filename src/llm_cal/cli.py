@@ -46,6 +46,8 @@ Options:
           Context length for KV cache estimation
       --refresh
           Bypass cache and re-fetch
+      --timeout-s <TIMEOUT_S>
+          Network timeout in seconds for model metadata requests [default: 30]
       --lang <LANG>
           Output language: en | zh (default auto-detects from LANG env)
       --list-gpus
@@ -84,6 +86,7 @@ COMPLETION_OPTIONS = (
     "--gpu-count",
     "--context-length",
     "--refresh",
+    "--timeout-s",
     "--lang",
     "--list-gpus",
     "--benchmark",
@@ -122,6 +125,11 @@ def main(
         None, "--context-length", help="Context length for KV cache estimation"
     ),
     refresh: bool = typer.Option(False, "--refresh", help="Bypass cache and re-fetch"),
+    timeout_s: float = typer.Option(
+        30.0,
+        "--timeout-s",
+        help="Network timeout in seconds for model metadata requests (default: 30).",
+    ),
     lang: str | None = typer.Option(
         None,
         "--lang",
@@ -224,13 +232,16 @@ def main(
     if not gpu:
         sys.stderr.write(t("cli.err.missing_gpu") + "\n")
         raise typer.Exit(code=1)
+    if timeout_s <= 0:
+        sys.stderr.write("--timeout-s must be greater than 0.\n")
+        raise typer.Exit(code=1)
 
     src_obj: ModelSource
     src_lower = source.lower()
     if src_lower in ("hf", "huggingface"):
-        src_obj = HuggingFaceSource()
+        src_obj = HuggingFaceSource(timeout_s=timeout_s)
     elif src_lower in ("ms", "modelscope"):
-        src_obj = ModelScopeSource()
+        src_obj = ModelScopeSource(timeout_s=timeout_s)
     else:
         sys.stderr.write(t("cli.err.unknown_source", source=source) + "\n")
         raise typer.Exit(code=1)
