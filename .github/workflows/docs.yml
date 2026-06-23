@@ -1,0 +1,67 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+      - 'README.md'
+      - 'src/llm_cal/**'
+      - 'scripts/generate_model_pages.py'
+  workflow_dispatch:
+
+# No untrusted inputs (github.event.*, head_ref, etc.) are used below.
+# All run: commands are static strings.
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install mkdocs-material + llm-infer-cal
+        run: |
+          pip install mkdocs-material
+          pip install -e .
+
+      - name: Generate model evaluation pages
+        # Hits HuggingFace API. HF_TOKEN is optional but increases rate limit.
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/generate_model_pages.py
+
+      - name: Build site
+        run: mkdocs build --strict
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+        with:
+          # Try to auto-enable Pages if not yet configured; falls back gracefully
+          # if the token lacks `actions: write`. One-time manual enable is still
+          # required for first deploy: Settings → Pages → Source: GitHub Actions.
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

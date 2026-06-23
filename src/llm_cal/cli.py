@@ -1,0 +1,377 @@
+"""CLI entry point. Thin shell over `Evaluator` + text formatter."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+import typer
+
+from llm_cal.benchmark.runner import exit_code_from, render_results_text, run_all
+from llm_cal.common.i18n import detect_locale_from_env, get_locale, set_locale, t
+from llm_cal.core.evaluator import Evaluator
+from llm_cal.core.explain import build as build_explain
+from llm_cal.hardware.loader import load_database
+from llm_cal.llm_review.reviewer import run_review
+from llm_cal.model_source.base import (
+    AuthRequiredError,
+    ModelNotFoundError,
+    ModelSource,
+    SourceUnavailableError,
+)
+from llm_cal.model_source.huggingface import HuggingFaceSource
+from llm_cal.model_source.modelscope import ModelScopeSource
+from llm_cal.output.formatter import (
+    render_explain_text,
+    render_gpu_list_text,
+    render_llm_review_text,
+    render_report_text,
+)
+
+HELP_TEXT = """LLM inference hardware calculator.
+
+Usage: llm-infer-cal [OPTIONS] [MODEL_ID]
+
+Arguments:
+  [MODEL_ID]  HuggingFace or ModelScope model id
+
+Options:
+      --gpu <GPU>
+          GPU type, e.g. H800, A100-80G
+      --engine <ENGINE>
+          Inference engine: vllm | sglang [default: vllm]
+      --gpu-count <GPU_COUNT>
+          Force GPU count (otherwise tool recommends)
+      --context-length <CONTEXT_LENGTH>
+          Context length for KV cache estimation
+      --refresh
+          Bypass cache and re-fetch
+      --lang <LANG>
+          Output language: en | zh (default auto-detects from LANG env)
+      --list-gpus
+          List all supported GPUs and exit (no model_id needed)
+      --benchmark
+          Run the curated benchmark dataset. Requires network
+      --input-tokens <INPUT_TOKENS>
+          Input token budget for prefill-latency estimation [default: 2000]
+      --output-tokens <OUTPUT_TOKENS>
+          Output token budget for total-latency math [default: 512]
+      --target-tokens-per-sec <TARGET_TOKENS_PER_SEC>
+          SLA: per-user decode tokens/second (drives L bound) [default: 30]
+      --prefill-util <PREFILL_UTIL>
+          Compute utilization factor for prefill [default: 0.4]
+      --decode-bw-util <DECODE_BW_UTIL>
+          Memory-bandwidth utilization factor for decode [default: 0.5]
+      --concurrency-degradation <CONCURRENCY_DEGRADATION>
+          High-concurrency throughput degradation factor [default: 1]
+      --explain
+          Print the full derivation trace
+      --llm-review
+          EXPERIMENTAL: send the derivation trace to an LLM for a second opinion
+      --source <SOURCE>
+          Model source: huggingface (default) | modelscope [default: huggingface]
+      --install-completion <SHELL>
+          Print portable shell completion install instructions
+      --show-completion <SHELL>
+          Show shell completion script
+  -h, --help
+          Print help
+"""
+
+COMPLETION_OPTIONS = (
+    "--gpu",
+    "--engine",
+    "--gpu-count",
+    "--context-length",
+    "--refresh",
+    "--lang",
+    "--list-gpus",
+    "--benchmark",
+    "--input-tokens",
+    "--output-tokens",
+    "--target-tokens-per-sec",
+    "--prefill-util",
+    "--decode-bw-util",
+    "--concurrency-degradation",
+    "--explain",
+    "--llm-review",
+    "--source",
+    "--install-completion",
+    "--show-completion",
+    "--help",
+)
+
+# Set locale from env first; --lang flag can override inside main()
+set_locale(detect_locale_from_env())
+
+app = typer.Typer(
+    name="llm-infer-cal",
+    help="LLM inference hardware calculator.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+@app.command()
+def main(
+    model_id: str | None = typer.Argument(None, help="HuggingFace or ModelScope model id"),
+    gpu: str | None = typer.Option(None, "--gpu", help="GPU type, e.g. H800, A100-80G"),
+    engine: str = typer.Option("vllm", "--engine", help="Inference engine: vllm | sglang"),
+    gpu_count: int | None = typer.Option(
+        None, "--gpu-count", help="Force GPU count (otherwise tool recommends)"
+    ),
+    context_length: int | None = typer.Option(
+        None, "--context-length", help="Context length for KV cache estimation"
+    ),
+    refresh: bool = typer.Option(False, "--refresh", help="Bypass cache and re-fetch"),
+    lang: str | None = typer.Option(
+        None,
+        "--lang",
+        help="Output language: en | zh (default auto-detects from LANG env)",
+    ),
+    list_gpus: bool = typer.Option(
+        False,
+        "--list-gpus",
+        help="List all supported GPUs and exit (no model_id needed)",
+    ),
+    benchmark: bool = typer.Option(
+        False,
+        "--benchmark",
+        help=(
+            "Run the curated benchmark dataset: compare tool output against "
+            "reference values from HF API, model cards, vLLM recipes. "
+            "Requires network. Exit 0 on all-pass, 1 if any FAIL."
+        ),
+    ),
+    input_tokens: int = typer.Option(
+        2000,
+        "--input-tokens",
+        help="Input token budget for prefill-latency estimation (default: 2000).",
+    ),
+    output_tokens: int = typer.Option(
+        512,
+        "--output-tokens",
+        help="Output token budget for total-latency math (default: 512).",
+    ),
+    target_tokens_per_sec: float = typer.Option(
+        30.0,
+        "--target-tokens-per-sec",
+        help="SLA: per-user decode tokens/second (drives L bound). Default: 30.",
+    ),
+    prefill_util: float = typer.Option(
+        0.40,
+        "--prefill-util",
+        help="Compute utilization factor for prefill (empirical, default 0.40).",
+    ),
+    decode_bw_util: float = typer.Option(
+        0.50,
+        "--decode-bw-util",
+        help="Memory-bandwidth utilization factor for decode (default 0.50).",
+    ),
+    concurrency_degradation: float = typer.Option(
+        1.0,
+        "--concurrency-degradation",
+        help=(
+            "High-concurrency throughput degradation factor (default 1.0 = "
+            "no degradation — the honest baseline). If your engine drops "
+            "to 60% efficiency under load, pass 1.67. See docs/methodology.md."
+        ),
+    ),
+    explain: bool = typer.Option(
+        False,
+        "--explain",
+        help=(
+            "Print the full derivation trace (formula, inputs, step-by-step, "
+            "source) for every non-trivial number. Feed the output to an LLM "
+            "if you want a second opinion on the math."
+        ),
+    ),
+    llm_review: bool = typer.Option(
+        False,
+        "--llm-review",
+        help=(
+            "EXPERIMENTAL: send the derivation trace to an LLM for a second "
+            "opinion. Output is tagged [llm-opinion] and never overrides the "
+            "6 primary labels. Requires env vars: LLM_CAL_REVIEWER_API_KEY "
+            "(required), LLM_CAL_REVIEWER_BASE_URL (default OpenAI), "
+            "LLM_CAL_REVIEWER_MODEL (default gpt-4o)."
+        ),
+    ),
+    source: str = typer.Option(
+        "huggingface",
+        "--source",
+        help=(
+            "Model source: huggingface (default) | modelscope. "
+            "Auth via HF_TOKEN or MODELSCOPE_API_TOKEN env var."
+        ),
+    ),
+) -> None:
+    """Evaluate a model against target hardware."""
+    if lang in ("en", "zh"):
+        set_locale(lang)  # type: ignore[arg-type]
+
+    # Meta commands short-circuit before requiring model_id + --gpu.
+    if list_gpus:
+        sys.stdout.write(render_gpu_list_text(load_database()) + "\n")
+        return
+
+    if benchmark:
+        results = run_all()
+        sys.stdout.write(render_results_text(results) + "\n")
+        sys.exit(exit_code_from(results))
+
+    if not model_id:
+        sys.stderr.write(t("cli.err.missing_model") + "\n")
+        raise typer.Exit(code=1)
+    if not gpu:
+        sys.stderr.write(t("cli.err.missing_gpu") + "\n")
+        raise typer.Exit(code=1)
+
+    src_obj: ModelSource
+    src_lower = source.lower()
+    if src_lower in ("hf", "huggingface"):
+        src_obj = HuggingFaceSource()
+    elif src_lower in ("ms", "modelscope"):
+        src_obj = ModelScopeSource()
+    else:
+        sys.stderr.write(t("cli.err.unknown_source", source=source) + "\n")
+        raise typer.Exit(code=1)
+
+    evaluator = Evaluator(source=src_obj)
+    try:
+        report = evaluator.evaluate(
+            model_id=model_id,
+            gpu=gpu,
+            engine=engine,
+            gpu_count=gpu_count,
+            context_length=context_length,
+            refresh=refresh,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            target_tokens_per_sec=target_tokens_per_sec,
+            prefill_utilization=prefill_util,
+            decode_bw_utilization=decode_bw_util,
+            concurrency_degradation=concurrency_degradation,
+        )
+    except AuthRequiredError as e:
+        sys.stderr.write(f"{t('cli.err.auth_required')} {e}\n")
+        sys.exit(2)
+    except ModelNotFoundError as e:
+        sys.stderr.write(f"{t('cli.err.model_not_found')} {e}\n")
+        sys.exit(3)
+    except SourceUnavailableError as e:
+        sys.stderr.write(f"{t('cli.err.source_unavailable')} {e}\n")
+        sys.exit(4)
+
+    sys.stdout.write(render_report_text(report))
+    explain_entries = build_explain(report) if (explain or llm_review) else []
+    if explain:
+        sys.stdout.write("\n\n")
+        sys.stdout.write(render_explain_text(explain_entries))
+    if llm_review:
+        # Locale at this point has been resolved by set_locale() calls above.
+        result = run_review(explain_entries, locale=get_locale())
+        sys.stdout.write("\n\n")
+        sys.stdout.write(render_llm_review_text(result))
+    sys.stdout.write("\n")
+
+
+def main_entry() -> int:
+    args = sys.argv[1:]
+    if not args or any(arg in ("-h", "--help") for arg in args):
+        sys.stdout.write(HELP_TEXT)
+        return 0
+    completion_exit = _handle_completion_args(args)
+    if completion_exit is not None:
+        code, stdout, stderr = completion_exit
+        sys.stdout.write(stdout)
+        sys.stderr.write(stderr)
+        return code
+    app()
+    return 0
+
+
+def _handle_completion_args(args: list[str]) -> tuple[int, str, str] | None:
+    for flag in ("--show-completion", "--install-completion"):
+        shell = _read_completion_shell(args, flag)
+        if shell is None:
+            continue
+        try:
+            script = _completion_script(shell)
+        except ValueError as e:
+            return 1, "", f"{e}\n"
+        if flag == "--show-completion":
+            return 0, script, ""
+        return 0, _completion_install_text(shell, script), ""
+    return None
+
+
+def _read_completion_shell(args: list[str], flag: str) -> str | None:
+    for index, arg in enumerate(args):
+        if arg == flag:
+            if index + 1 < len(args) and not args[index + 1].startswith("-"):
+                return args[index + 1].lower()
+            return _default_completion_shell()
+        prefix = f"{flag}="
+        if arg.startswith(prefix):
+            return arg[len(prefix) :].lower()
+    return None
+
+
+def _default_completion_shell() -> str:
+    shell = (os.environ.get("SHELL") or "").rsplit("/", 1)[-1].lower()
+    if shell in {"bash", "zsh", "fish", "powershell", "pwsh"}:
+        return shell
+    return "zsh"
+
+
+def _completion_script(shell: str) -> str:
+    if shell == "zsh":
+        option_lines = "\n".join(f"    '{option}'" for option in COMPLETION_OPTIONS)
+        return (
+            "#compdef llm-infer-cal\n\n"
+            "_llm_infer_cal_completion() {\n"
+            "  local -a options\n"
+            "  options=(\n"
+            f"{option_lines}\n"
+            "  )\n"
+            "  _describe 'llm-infer-cal options' options\n"
+            "}\n\n"
+            "compdef _llm_infer_cal_completion llm-infer-cal\n"
+        )
+    if shell == "bash":
+        words = " ".join(COMPLETION_OPTIONS)
+        return (
+            "_llm_infer_cal_completion() {\n"
+            "  local cur\n"
+            "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+            f"  COMPREPLY=( $(compgen -W \"{words}\" -- \"$cur\") )\n"
+            "}\n"
+            "complete -F _llm_infer_cal_completion llm-infer-cal\n"
+        )
+    if shell == "fish":
+        return "".join(
+            f"complete -c llm-infer-cal -l {option.removeprefix('--')}\n"
+            for option in COMPLETION_OPTIONS
+            if option.startswith("--")
+        )
+    if shell in {"powershell", "pwsh"}:
+        words = ", ".join(f"'{option}'" for option in COMPLETION_OPTIONS)
+        return (
+            "Register-ArgumentCompleter -Native -CommandName llm-infer-cal "
+            "-ScriptBlock {\n"
+            "  param($wordToComplete)\n"
+            f"  @({words}) | Where-Object {{ $_ -like \"$wordToComplete*\" }}\n"
+            "}\n"
+        )
+    raise ValueError(f"Unsupported shell '{shell}'. Use bash, zsh, fish, or powershell.")
+
+
+def _completion_install_text(shell: str, script: str) -> str:
+    return (
+        f"Completion install instructions for {shell}:\n\n"
+        f"{script}\n"
+        "Add the script above to your shell completion setup, then restart the terminal.\n"
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main_entry())
