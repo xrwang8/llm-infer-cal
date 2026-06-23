@@ -1,7 +1,7 @@
 use llm_infer_cal_core::architecture::profile::{
     ArchitectureProfile, AttentionTraits, AttentionVariant, Confidence, Family, MoeTraits,
 };
-use llm_infer_cal_core::fleet::planner::plan;
+use llm_infer_cal_core::fleet::planner::{kv_shards, plan};
 use llm_infer_cal_core::hardware::loader::{lookup, GPUSpec};
 use llm_infer_cal_core::output::labels::{AnnotatedValue, Label};
 use llm_infer_cal_core::performance::compute::{
@@ -41,6 +41,7 @@ fn deepseek_v4_profile() -> ArchitectureProfile {
             head_dim: 512,
             q_lora_rank: None,
             kv_lora_rank: None,
+            qk_rope_head_dim: None,
             compress_ratios: Some([vec![0], vec![4; 42], vec![0]].concat()),
             nsa_topk: None,
         }),
@@ -71,6 +72,7 @@ fn llama_profile() -> ArchitectureProfile {
             head_dim: 128,
             q_lora_rank: None,
             kv_lora_rank: None,
+            qk_rope_head_dim: None,
             compress_ratios: None,
             nsa_topk: None,
         }),
@@ -78,8 +80,38 @@ fn llama_profile() -> ArchitectureProfile {
     }
 }
 
+fn glm52_profile() -> ArchitectureProfile {
+    ArchitectureProfile {
+        model_type: "glm_moe_dsa".to_string(),
+        architectures: vec!["glmmoedsaforcausallm".to_string()],
+        family: Family::Transformer,
+        num_hidden_layers: 78,
+        hidden_size: 6144,
+        vocab_size: 154_880,
+        confidence: Confidence::High,
+        attention: Some(AttentionTraits {
+            variant: AttentionVariant::Mla,
+            num_heads: 64,
+            num_kv_heads: 64,
+            head_dim: 192,
+            q_lora_rank: Some(2048),
+            kv_lora_rank: Some(512),
+            qk_rope_head_dim: Some(64),
+            compress_ratios: None,
+            nsa_topk: None,
+        }),
+        moe: Some(MoeTraits {
+            num_routed_experts: 256,
+            num_shared_experts: 1,
+            num_experts_per_tok: 8,
+            moe_intermediate_size: 2048,
+        }),
+        ..ArchitectureProfile::default()
+    }
+}
+
 #[test]
-fn hardware_lookup_matches_python_aliases_and_helpful_errors() {
+fn hardware_lookup_matches_rust_contract_aliases_and_helpful_errors() {
     let h800 = lookup("H800").unwrap();
     let h800_alias = lookup("h800-sxm5").unwrap();
     let b200 = lookup("B200").unwrap();
@@ -96,7 +128,7 @@ fn hardware_lookup_matches_python_aliases_and_helpful_errors() {
 }
 
 #[test]
-fn nvlink_efficiency_and_decode_penalty_match_python() {
+fn nvlink_efficiency_and_decode_penalty_match_rust_contract() {
     assert_eq!(nvlink_efficiency(&gpu(0), 1), 1.0);
     assert_eq!(nvlink_efficiency(&gpu(900), 8), 1.0);
     assert_eq!(nvlink_efficiency(&gpu(0), 8), 0.80);
@@ -201,6 +233,52 @@ fn fleet_planner_flags_forced_invalid_count_and_shards_gqa_kv() {
         .unwrap();
     let ctx_128k = prod.max_concurrent_by_context[0].1;
     assert!(ctx_128k > 30);
+}
+
+#[test]
+fn fleet_planner_has_no_recommendation_when_no_candidate_fits() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan(
+        &llama_profile(),
+        6_000_000_000_000,
+        10_000_000_000,
+        &h100,
+        None,
+        &[(131_072, 10_000_000_000), (1_048_576, 80_000_000_000)],
+    );
+
+    assert_eq!(rec.valid_tp_sizes, vec![1, 2, 4, 8]);
+    assert!(rec.options.iter().all(|option| !option.fits));
+    assert_eq!(rec.best_tier, None);
+    assert!(rec.best_option().is_none());
+}
+
+#[test]
+fn fleet_planner_recommends_multinode_for_glm52_bf16_on_h100() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan(
+        &glm52_profile(),
+        1_506_670_000_000,
+        11_780_000_000,
+        &h100,
+        None,
+        &[(131_072, 11_780_000_000), (1_048_576, 94_240_000_000)],
+    );
+
+    assert_eq!(kv_shards(&glm52_profile(), 8), 1);
+    assert_eq!(
+        rec.options
+            .iter()
+            .map(|option| option.gpu_count)
+            .collect::<Vec<_>>(),
+        vec![24, 48, 48]
+    );
+    assert_eq!(rec.best_tier, Some("dev"));
+    let best = rec.best_option().unwrap();
+    assert_eq!(best.tensor_parallel_size, 8);
+    assert_eq!(best.pipeline_parallel_size, 6);
+    assert_eq!(best.node_count, 6);
+    assert!(best.fits);
 }
 
 #[test]

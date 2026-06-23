@@ -65,7 +65,7 @@ fn report() -> llm_infer_cal_core::core::evaluator::EvaluationReport {
 }
 
 #[test]
-fn build_emits_python_explain_entries_in_report_order() {
+fn build_emits_explain_entries_in_report_order() {
     let entries = build(&report());
     let headings = entries
         .iter()
@@ -91,7 +91,7 @@ fn build_emits_python_explain_entries_in_report_order() {
 
     assert_eq!(
         entries[0].formula,
-        "sum(sibling.size for sibling in HF model_info(files_metadata=True).siblings if sibling.endswith('.safetensors'))"
+        "sum(file.size for file in model_source.file_metadata if file.endswith('.safetensors'))"
     );
     assert_eq!(
         entries[0].inputs[0].value,

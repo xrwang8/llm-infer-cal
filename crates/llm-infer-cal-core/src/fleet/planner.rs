@@ -1,14 +1,18 @@
-use crate::architecture::profile::ArchitectureProfile;
+use crate::architecture::profile::{ArchitectureProfile, AttentionVariant};
 use crate::hardware::loader::GPUSpec;
 
 const OVERHEAD_FRACTION: f64 = 0.10;
 const REFERENCE_CTX_TOKENS: u64 = 131_072;
 const MAX_TP_SINGLE_NODE: u64 = 8;
+const MAX_PIPELINE_PARALLEL: u64 = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FleetOption {
     pub tier: &'static str,
     pub gpu_count: u64,
+    pub tensor_parallel_size: u64,
+    pub pipeline_parallel_size: u64,
+    pub node_count: u64,
     pub weight_bytes_per_gpu: u64,
     pub kv_bytes_per_request: u64,
     pub max_concurrent_at_reference_ctx: u64,
@@ -22,10 +26,19 @@ pub struct FleetOption {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FleetRecommendation {
     pub options: Vec<FleetOption>,
-    pub best_tier: &'static str,
+    pub best_tier: Option<&'static str>,
     pub valid_tp_sizes: Vec<u64>,
     pub constraint_note_en: String,
     pub constraint_note_zh: String,
+}
+
+impl FleetRecommendation {
+    pub fn best_option(&self) -> Option<&FleetOption> {
+        let tier = self.best_tier?;
+        self.options
+            .iter()
+            .find(|option| option.tier == tier && option.fits)
+    }
 }
 
 struct EvalContext<'a> {
@@ -34,6 +47,7 @@ struct EvalContext<'a> {
     kv_bytes: u64,
     usable_per_gpu: u64,
     valid_tp: &'a [u64],
+    candidates: &'a [u64],
     kv_by_context: &'a [(u64, u64)],
 }
 
@@ -48,6 +62,7 @@ pub fn plan(
     let usable_per_gpu =
         (gpu.memory_gb as f64 * 1_000_000_000.0 * (1.0 - OVERHEAD_FRACTION)) as u64;
     let valid_tp = valid_tp_sizes(profile);
+    let candidates = candidate_gpu_counts(profile, &valid_tp);
     let constraint_en = constraint_note_en(profile, &valid_tp);
     let constraint_zh = constraint_note_zh(profile, &valid_tp);
     let eval = EvalContext {
@@ -56,14 +71,16 @@ pub fn plan(
         kv_bytes: kv_bytes_per_request_at_ref,
         usable_per_gpu,
         valid_tp: &valid_tp,
+        candidates: &candidates,
         kv_by_context: kv_bytes_by_context,
     };
 
     if let Some(forced_gpu_count) = forced_gpu_count {
         let option = evaluate_count(forced_gpu_count, "dev", &eval);
+        let best_tier = option.fits.then_some("dev");
         return FleetRecommendation {
             options: vec![option],
-            best_tier: "dev",
+            best_tier,
             valid_tp_sizes: valid_tp,
             constraint_note_en: constraint_en,
             constraint_note_zh: constraint_zh,
@@ -74,24 +91,23 @@ pub fn plan(
     let mut options = Vec::new();
     for (tier, concurrent) in tiers {
         let gpu_count = smallest_fitting_count(
-            &valid_tp,
+            &candidates,
             profile,
             weight_bytes,
             kv_bytes_per_request_at_ref,
             usable_per_gpu,
             concurrent,
         );
-        let chosen = gpu_count.unwrap_or_else(|| *valid_tp.iter().max().unwrap_or(&1));
+        let chosen = gpu_count.unwrap_or_else(|| *candidates.iter().max().unwrap_or(&1));
         options.push(evaluate_count(chosen, tier, &eval));
     }
 
-    let best_tier = if options.get(1).is_some_and(|option| option.fits) {
-        "dev"
-    } else if options.first().is_some_and(|option| option.fits) {
-        "min"
-    } else {
-        "prod"
-    };
+    let best_tier = ["dev", "min", "prod"].iter().find_map(|tier| {
+        options
+            .iter()
+            .find(|option| option.tier == *tier && option.fits)
+            .map(|option| option.tier)
+    });
 
     FleetRecommendation {
         options,
@@ -120,23 +136,57 @@ pub fn valid_tp_sizes(profile: &ArchitectureProfile) -> Vec<u64> {
     }
 }
 
+fn candidate_gpu_counts(profile: &ArchitectureProfile, valid_tp: &[u64]) -> Vec<u64> {
+    let mut candidates = valid_tp.to_vec();
+    let max_tp = valid_tp.iter().copied().max().unwrap_or(1);
+    if max_tp > 0 {
+        let layers = profile.num_hidden_layers;
+        for pp in 2..=MAX_PIPELINE_PARALLEL {
+            if layers == 0 || layers % pp == 0 {
+                candidates.push(max_tp * pp);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    candidates
+}
+
+fn layout_for_count(profile: &ArchitectureProfile, gpu_count: u64) -> (u64, u64, u64) {
+    let valid_tp = valid_tp_sizes(profile);
+    let max_tp = valid_tp.iter().copied().max().unwrap_or(1);
+    if gpu_count <= max_tp {
+        return (gpu_count.max(1), 1, 1);
+    }
+    let pp = ceil_div(gpu_count, max_tp).max(1);
+    (max_tp, pp, pp)
+}
+
 pub fn kv_shards(profile: &ArchitectureProfile, tp_size: u64) -> u64 {
     let Some(attention) = &profile.attention else {
         return 1;
     };
+    if attention.variant == AttentionVariant::Mla {
+        return 1;
+    }
     let kv_heads = attention.num_kv_heads.max(1);
     tp_size.min(kv_heads)
 }
 
+pub fn effective_kv_shards(profile: &ArchitectureProfile, gpu_count: u64) -> u64 {
+    let (tp, pp, _) = layout_for_count(profile, gpu_count);
+    pp * kv_shards(profile, tp)
+}
+
 fn smallest_fitting_count(
-    valid_tp: &[u64],
+    candidates: &[u64],
     profile: &ArchitectureProfile,
     weight_bytes: u64,
     kv_bytes: u64,
     usable_per_gpu: u64,
     concurrent: u64,
 ) -> Option<u64> {
-    valid_tp.iter().copied().find(|count| {
+    candidates.iter().copied().find(|count| {
         fits(
             *count,
             profile,
@@ -157,15 +207,17 @@ fn fits(
     concurrent: u64,
 ) -> bool {
     let weight_per_gpu = ceil_div(weight_bytes, gpu_count);
-    let shards = kv_shards(profile, gpu_count);
+    let shards = effective_kv_shards(profile, gpu_count);
     let kv_per_gpu = ceil_div(kv_bytes, shards);
     let needed = weight_per_gpu + concurrent * kv_per_gpu;
     needed <= usable_per_gpu
 }
 
 fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) -> FleetOption {
+    let (tensor_parallel_size, pipeline_parallel_size, node_count) =
+        layout_for_count(eval.profile, gpu_count);
     let weight_per_gpu = ceil_div(eval.weight_bytes, gpu_count);
-    let shards = kv_shards(eval.profile, gpu_count);
+    let shards = effective_kv_shards(eval.profile, gpu_count);
     let kv_per_gpu = ceil_div(eval.kv_bytes, shards);
     let headroom = eval.usable_per_gpu.saturating_sub(weight_per_gpu);
     let max_concurrent = headroom.checked_div(kv_per_gpu).unwrap_or(0);
@@ -199,14 +251,25 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         tier_concurrent,
     );
 
-    let (reason_en, reason_zh) = if !eval.valid_tp.contains(&gpu_count) {
+    let layout_en = if pipeline_parallel_size > 1 {
+        format!("TP{tensor_parallel_size}xPP{pipeline_parallel_size}, {node_count} nodes")
+    } else {
+        format!("TP{tensor_parallel_size}")
+    };
+    let layout_zh = if pipeline_parallel_size > 1 {
+        format!("TP{tensor_parallel_size}×PP{pipeline_parallel_size}，{node_count} 节点")
+    } else {
+        format!("TP{tensor_parallel_size}")
+    };
+
+    let (reason_en, reason_zh) = if !eval.candidates.contains(&gpu_count) {
         (
             format!(
-                "GPU count {gpu_count} does not divide num_heads - valid TP sizes: {:?}",
+                "GPU count {gpu_count} does not divide num_heads or match a valid multi-node PP layout - valid single-node TP sizes: {:?}",
                 eval.valid_tp
             ),
             format!(
-                "GPU 张数 {gpu_count} 无法整除注意力头数——有效 TP 张数：{:?}",
+                "GPU 张数 {gpu_count} 无法整除注意力头数，也不匹配有效多节点 PP 布局——有效单节点 TP 张数：{:?}",
                 eval.valid_tp
             ),
         )
@@ -224,11 +287,11 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     } else {
         (
             format!(
-                "fits ~{max_concurrent} concurrent @ {}K ctx",
+                "fits ~{max_concurrent} concurrent @ {}K ctx ({layout_en})",
                 REFERENCE_CTX_TOKENS / 1024
             ),
             format!(
-                "可容纳约 {max_concurrent} 并发请求 @ {}K 上下文",
+                "可容纳约 {max_concurrent} 并发请求 @ {}K 上下文（{layout_zh}）",
                 REFERENCE_CTX_TOKENS / 1024
             ),
         )
@@ -237,6 +300,9 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     FleetOption {
         tier,
         gpu_count,
+        tensor_parallel_size,
+        pipeline_parallel_size,
+        node_count,
         weight_bytes_per_gpu: weight_per_gpu,
         kv_bytes_per_request: eval.kv_bytes,
         max_concurrent_at_reference_ctx: max_concurrent,
@@ -254,9 +320,23 @@ fn constraint_note_en(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String
         .as_ref()
         .map(|attention| attention.num_heads)
         .unwrap_or(0);
+    let candidates = candidate_gpu_counts(profile, valid_tp);
+    let multi_node = candidates
+        .iter()
+        .copied()
+        .filter(|count| !valid_tp.contains(count))
+        .collect::<Vec<_>>();
+    let multi_note = if multi_node.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Multi-node candidates (TP{} x PP): {multi_node:?}.",
+            valid_tp.iter().max().unwrap_or(&1)
+        )
+    };
     format!(
         "TP must divide num_heads={heads}. Candidates within one node (<=8 GPUs): {valid_tp:?}."
-    )
+    ) + &multi_note
 }
 
 fn constraint_note_zh(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String {
@@ -265,7 +345,21 @@ fn constraint_note_zh(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String
         .as_ref()
         .map(|attention| attention.num_heads)
         .unwrap_or(0);
-    format!("TP 张数必须整除 num_heads={heads}。单节点（≤8 卡）候选：{valid_tp:?}。")
+    let candidates = candidate_gpu_counts(profile, valid_tp);
+    let multi_node = candidates
+        .iter()
+        .copied()
+        .filter(|count| !valid_tp.contains(count))
+        .collect::<Vec<_>>();
+    let multi_note = if multi_node.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " 单节点放不下时尝试多节点候选（TP{} × PP）：{multi_node:?}。",
+            valid_tp.iter().max().unwrap_or(&1)
+        )
+    };
+    format!("TP 张数必须整除 num_heads={heads}。单节点（≤8 卡）候选：{valid_tp:?}。") + &multi_note
 }
 
 fn ceil_div(value: u64, divisor: u64) -> u64 {

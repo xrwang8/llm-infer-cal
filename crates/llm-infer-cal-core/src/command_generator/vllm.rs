@@ -1,18 +1,28 @@
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::{needs_trust_remote_code, render_flag};
+use crate::command_generator::{needs_trust_remote_code, render_flag, Parallelism};
 use crate::engine_compat::EngineCompatEntry;
 
 pub fn generate_vllm_command(
     model_id: &str,
     profile: &ArchitectureProfile,
-    tensor_parallel_size: u64,
+    parallelism: Parallelism,
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
 ) -> String {
     let mut lines = vec![
         format!("vllm serve {model_id}"),
-        format!("  --tensor-parallel-size {tensor_parallel_size}"),
+        format!(
+            "  --tensor-parallel-size {}",
+            parallelism.tensor_parallel_size
+        ),
     ];
+    if parallelism.pipeline_parallel_size > 1 {
+        lines.push(format!(
+            "  --pipeline-parallel-size {}",
+            parallelism.pipeline_parallel_size
+        ));
+        lines.push("  --distributed-executor-backend ray".to_string());
+    }
 
     let effective_max = max_model_len.or_else(|| {
         profile

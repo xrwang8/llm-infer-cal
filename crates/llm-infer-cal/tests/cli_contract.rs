@@ -94,7 +94,7 @@ fn unknown_source_returns_localized_error() {
 }
 
 #[test]
-fn help_exposes_python_cli_flags() {
+fn help_exposes_cli_flags() {
     let exit = run_cli(["llm-infer-cal", "--help"]);
 
     assert_eq!(exit.code, 0);

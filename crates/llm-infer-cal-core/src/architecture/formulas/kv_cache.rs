@@ -95,7 +95,7 @@ fn per_layer_per_token_bytes(attention: &AttentionTraits, dtype_bytes: u64) -> u
     if attention.variant == AttentionVariant::Mla {
         if let Some(kv_lora_rank) = attention.kv_lora_rank {
             if kv_lora_rank > 0 {
-                return kv_lora_rank * dtype_bytes;
+                return (kv_lora_rank + attention.qk_rope_head_dim.unwrap_or(0)) * dtype_bytes;
             }
         }
     }

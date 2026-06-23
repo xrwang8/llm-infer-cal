@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 
 fn load_config(name: &str) -> Value {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
         .join("tests")
         .join("fixtures")
         .join("configs")
@@ -17,7 +16,7 @@ fn load_config(name: &str) -> Value {
 }
 
 #[test]
-fn deepseek_v4_flash_traits_stack_like_python() {
+fn deepseek_v4_flash_traits_stack_like_rust_contract() {
     let profile = detect(&load_config("deepseek_v4_flash"));
 
     assert_eq!(profile.family, Family::Transformer);
@@ -33,7 +32,7 @@ fn deepseek_v4_flash_traits_stack_like_python() {
 }
 
 #[test]
-fn llama_and_mistral_detection_match_python() {
+fn llama_and_mistral_detection_match_rust_contract() {
     let llama = detect(&load_config("llama3_70b"));
     let mistral = detect(&load_config("mistral_sliding"));
 
@@ -48,7 +47,7 @@ fn llama_and_mistral_detection_match_python() {
 }
 
 #[test]
-fn state_space_and_unknown_fallback_match_python() {
+fn state_space_and_unknown_fallback_match_rust_contract() {
     let mamba = detect(&load_config("mamba"));
     let unknown = detect(&load_config("unknown_model"));
     let empty = detect(&json!({}));
@@ -77,7 +76,7 @@ fn future_complete_config_is_medium_confidence_transformer() {
 }
 
 #[test]
-fn csa_hca_length_rules_match_python() {
+fn csa_hca_length_rules_match_rust_contract() {
     let mismatch = detect(&json!({
         "model_type": "hypothetical",
         "architectures": ["Hypothetical"],
@@ -109,7 +108,7 @@ fn csa_hca_length_rules_match_python() {
 }
 
 #[test]
-fn attention_ordering_and_direct_trait_detectors_match_python() {
+fn attention_ordering_and_direct_trait_detectors_match_rust_contract() {
     let mla = detect(&json!({
         "model_type": "deepseek_v2",
         "hidden_size": 4096,
@@ -154,4 +153,19 @@ fn fallback_unknown_preserves_basic_shape() {
     assert_eq!(profile.family, Family::Unknown);
     assert_eq!(profile.confidence, Confidence::Low);
     assert_eq!(profile.num_hidden_layers, 0);
+}
+
+#[test]
+fn mla_attention_detects_qk_rope_head_dim() {
+    let attention = detect_attention(&json!({
+        "num_attention_heads": 64,
+        "num_key_value_heads": 64,
+        "head_dim": 192,
+        "q_lora_rank": 2048,
+        "kv_lora_rank": 512,
+        "qk_rope_head_dim": 64
+    }));
+
+    assert_eq!(attention.variant, AttentionVariant::Mla);
+    assert_eq!(attention.qk_rope_head_dim, Some(64));
 }

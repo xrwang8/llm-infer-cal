@@ -137,7 +137,7 @@ fn fetch_uses_custom_endpoint_and_main_when_sha_missing() {
 }
 
 #[test]
-fn fetch_maps_model_info_errors_like_python() {
+fn fetch_maps_model_info_errors_like_rust_contract() {
     let mut not_found = FakeClient::new([json_resp(json!({"error": "missing"}), 404)]);
     let err = HuggingFaceSource::default()
         .fetch_with_client("missing/repo", &mut not_found, None)
@@ -175,7 +175,7 @@ fn fetch_maps_model_info_errors_like_python() {
 }
 
 #[test]
-fn fetch_maps_config_errors_like_python() {
+fn fetch_maps_config_errors_like_rust_contract() {
     let info = json!({"sha": "abc", "siblings": []});
 
     let mut missing_config =

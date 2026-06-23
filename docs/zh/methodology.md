@@ -9,11 +9,11 @@
 这些是**从公开数据直接推导**，不含经验系数：
 
 ### 权重字节数
-**公式**：从 HF `model_info().siblings` 把 safetensors 文件大小求和。
+**公式**：从所选数据源（HuggingFace 或 ModelScope）的文件元数据中，把 safetensors 文件大小求和。
 
 **标签**：`[已验证]`。
 
-**为什么可信**：直接读 HuggingFace 官方 API 返回的数据。无估算步骤。这个字节数和你 `wget` 下载模型得到的完全一致。
+**为什么可信**：直接读取数据源返回的文件元数据。无估算步骤。这个字节数就是下载模型权重时得到的字节数。
 
 ### 单请求 KV Cache
 **公式（标准 attention）**：
@@ -22,7 +22,13 @@ per_token_per_layer_bytes = 2 × num_kv_heads × head_dim × dtype_bytes
 total_bytes = per_token_per_layer_bytes × seq_len × num_layers
 ```
 
-**公式（MLA）**：用 `kv_lora_rank` 替代 `num_kv_heads × head_dim`（DeepSeek 的压缩 KV 表示）。
+**公式（MLA）**：
+```
+per_token_per_layer_bytes = (kv_lora_rank + qk_rope_head_dim) × dtype_bytes
+total_bytes = per_token_per_layer_bytes × seq_len × num_layers
+```
+
+`kv_lora_rank` 是压缩 latent KV，`qk_rope_head_dim` 是 MLA 类模型 config 中暴露的 decoupled RoPE key 维度。
 
 **公式（CSA+HCA / NSA）**：baseline × 每层压缩系数（从 `compress_ratios` 数组平均）。
 
@@ -31,17 +37,20 @@ total_bytes = per_token_per_layer_bytes × seq_len × num_layers
 **来源**：
 - 标准 attention KV 公式：transformer 推理文献里普遍引用
 - MLA 细节：DeepSeek-V2 paper（DeepSeek-AI，2024-05）
-- CSA+HCA 细节：DeepSeek-V4 技术报告 + HF config.json `compress_ratios` 字段语义
+- CSA+HCA 细节：DeepSeek-V4 技术报告 + 模型 config.json `compress_ratios` 字段语义
 
-### TP 感知的 KV 分摊
+### TP/PP 感知的 KV 分摊
 **公式**：
 ```
-per_gpu_KV = total_KV / min(tp_size, num_kv_heads)
+tp_kv_shards = 1                          # MLA
+tp_kv_shards = min(tp_size, num_kv_heads) # MQA/GQA/MHA
+effective_kv_shards = pp_size × tp_kv_shards
+per_gpu_KV = total_KV / effective_kv_shards
 ```
 
-**来源**：vLLM 的 TP 实现。MQA（kv_heads=1）时 KV 永远复制；GQA（kv_heads=G）可切最多 G 份。匹配 vLLM 真实 sharding 行为（读了 `vllm/model_executor/layers/rotary_embedding.py` 和 TP 相关代码验证）。
+**来源**：vLLM 的 TP KV 分摊实现，以及 vLLM / SGLang 多机 TP/PP 启动约定。MQA（kv_heads=1）时 KV 在 TP 维度复制；GQA（kv_heads=G）最多切 G 份；MLA 在 planner 里不按 TP 切 latent KV，但 PP stage 会分摊层数。
 
-**为什么重要**：早期版本的 llm-infer-cal（和今天的 SelfHostLLM）假设全复制，会把 GQA 模型的 KV 压力高估最多 8 倍。
+**为什么重要**：只看单节点会把超大模型误报成 8 卡可运行。TP/PP 规划会先暴露 8 卡放不下，再搜索 `TP8 × PP6` 这类有效多机布局。
 
 ---
 

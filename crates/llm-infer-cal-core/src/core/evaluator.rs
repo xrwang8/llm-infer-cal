@@ -6,10 +6,11 @@ use crate::architecture::formulas::weight::estimate_total_params;
 use crate::architecture::profile::ArchitectureProfile;
 use crate::command_generator::sglang::generate_sglang_command;
 use crate::command_generator::vllm::generate_vllm_command;
+use crate::command_generator::Parallelism;
 use crate::core::cache::{ArtifactCache, CacheKey};
 use crate::engine_compat::loader::find_match;
 use crate::engine_compat::EngineCompatEntry;
-use crate::fleet::planner::{kv_shards, plan, FleetRecommendation};
+use crate::fleet::planner::{effective_kv_shards, plan, FleetOption, FleetRecommendation};
 use crate::hardware::loader::{lookup, GPUSpec};
 use crate::model_source::base::{ModelArtifact, ModelSource, ModelSourceError};
 use crate::model_source::huggingface::HuggingFaceSource;
@@ -168,23 +169,16 @@ impl Evaluator {
                     options.gpu_count,
                     &kv_by_context_bytes,
                 );
-                let chosen_count = options.gpu_count.unwrap_or_else(|| {
-                    recommendation
-                        .options
-                        .iter()
-                        .find(|option| option.tier == recommendation.best_tier)
-                        .or_else(|| recommendation.options.first())
-                        .map(|option| option.gpu_count)
-                        .unwrap_or(1)
-                });
-                generated_command = Some(generate_command(
-                    engine,
-                    model_id,
-                    &profile,
-                    chosen_count,
-                    engine_match.as_ref(),
-                    options.context_length,
-                ));
+                if let Some(chosen_option) = recommendation.best_option() {
+                    generated_command = Some(generate_command(
+                        engine,
+                        model_id,
+                        &profile,
+                        chosen_option,
+                        engine_match.as_ref(),
+                        options.context_length,
+                    ));
+                }
                 fleet = Some(recommendation);
             }
         }
@@ -193,16 +187,8 @@ impl Evaluator {
         let mut decode = None;
         let mut concurrency = None;
         if let (Some(spec), Some(recommendation)) = (&gpu_spec, &fleet) {
-            if total_params > 0 {
-                let chosen = options.gpu_count.unwrap_or_else(|| {
-                    recommendation
-                        .options
-                        .iter()
-                        .find(|option| option.tier == recommendation.best_tier)
-                        .or_else(|| recommendation.options.first())
-                        .map(|option| option.gpu_count)
-                        .unwrap_or(1)
-                });
+            if let (true, Some(chosen_option)) = (total_params > 0, recommendation.best_option()) {
+                let chosen = chosen_option.gpu_count;
                 let input_tokens = options.input_tokens.unwrap_or(2000);
                 let target_tokens_per_sec = options.target_tokens_per_sec.unwrap_or(30.0);
 
@@ -231,29 +217,22 @@ impl Evaluator {
                     moe_active_ratio,
                 );
 
-                let chosen_option = recommendation
-                    .options
-                    .iter()
-                    .find(|option| option.gpu_count == chosen)
-                    .or_else(|| recommendation.options.last());
-                if let Some(chosen_option) = chosen_option {
-                    if let Some((kv_ref_ctx, kv_ref_bytes)) =
-                        reference_context_bytes(&kv_cache_by_context)
-                    {
-                        let _ = kv_ref_ctx;
-                        let headroom_per_gpu = chosen_option
-                            .usable_bytes_per_gpu
-                            .saturating_sub(chosen_option.weight_bytes_per_gpu);
-                        let shards = kv_shards(&profile, chosen).max(1);
-                        let kv_ref_per_gpu = (kv_ref_bytes / shards).max(1);
-                        concurrency = Some(analyze_concurrency(
-                            headroom_per_gpu,
-                            kv_ref_per_gpu,
-                            &decode_estimate,
-                            target_tokens_per_sec,
-                            options.concurrency_degradation,
-                        ));
-                    }
+                if let Some((kv_ref_ctx, kv_ref_bytes)) =
+                    reference_context_bytes(&kv_cache_by_context)
+                {
+                    let _ = kv_ref_ctx;
+                    let headroom_per_gpu = chosen_option
+                        .usable_bytes_per_gpu
+                        .saturating_sub(chosen_option.weight_bytes_per_gpu);
+                    let shards = effective_kv_shards(&profile, chosen).max(1);
+                    let kv_ref_per_gpu = (kv_ref_bytes / shards).max(1);
+                    concurrency = Some(analyze_concurrency(
+                        headroom_per_gpu,
+                        kv_ref_per_gpu,
+                        &decode_estimate,
+                        target_tokens_per_sec,
+                        options.concurrency_degradation,
+                    ));
                 }
                 decode = Some(decode_estimate);
             }
@@ -387,13 +366,18 @@ fn generate_command(
     engine: &str,
     model_id: &str,
     profile: &ArchitectureProfile,
-    tp: u64,
+    option: &FleetOption,
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
 ) -> String {
+    let parallelism = Parallelism {
+        total_gpus: option.gpu_count,
+        tensor_parallel_size: option.tensor_parallel_size,
+        pipeline_parallel_size: option.pipeline_parallel_size,
+    };
     if engine.trim().eq_ignore_ascii_case("sglang") {
-        generate_sglang_command(model_id, profile, tp, entry, max_model_len)
+        generate_sglang_command(model_id, profile, parallelism, entry, max_model_len)
     } else {
-        generate_vllm_command(model_id, profile, tp, entry, max_model_len)
+        generate_vllm_command(model_id, profile, parallelism, entry, max_model_len)
     }
 }

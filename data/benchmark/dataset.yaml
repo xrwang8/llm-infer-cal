@@ -12,7 +12,7 @@ schema_version: 1
 entries:
   # ------------------------------------------------------------
   # Signature case — DeepSeek-V4-Flash. Every claim here is the
-  # reason this tool exists (vs gpu_poor's naive FP8 assumption).
+  # reason this tool exists: real safetensors bytes beat naive FP8 assumptions.
   # ------------------------------------------------------------
   - name: "DeepSeek-V4-Flash on 8x H800 (tool's reference case)"
     model_id: deepseek-ai/DeepSeek-V4-Flash
@@ -61,8 +61,8 @@ entries:
         expected: false
         source: "config.json has no n_routed_experts / num_local_experts"
       - field: fleet_prod_gpus_at_most
-        expected: 8
-        source: "Weights fit on 8x H100 (145 GB / 8 ≈ 18 GB per GPU)"
+        expected: 16
+        source: "Weights fit on one H100 node, but prod concurrency may choose TP8 x PP2"
 
   # ------------------------------------------------------------
   # DeepSeek-V3 (classic MoE + MLA, not V3.2's NSA) — validates MLA detection

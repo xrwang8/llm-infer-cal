@@ -28,7 +28,7 @@ fn engine_matrix_loads_and_matches_deepseek_v4() {
 }
 
 #[test]
-fn engine_find_match_respects_version_and_case_like_python() {
+fn engine_find_match_respects_version_and_case_like_rust_contract() {
     let current = find_match("VLLM", "DEEPSEEK_V4", Some("0.19.0"), None).unwrap();
     let older = find_match("vllm", "deepseek_v4", Some("0.18.0"), None);
     let invalid = find_match("vllm", "deepseek_v4", Some("not-a-version"), None).unwrap();
@@ -51,7 +51,7 @@ fn engine_find_match_returns_highest_lower_bound_when_version_is_absent() {
 }
 
 #[test]
-fn i18n_translates_unknown_keys_and_templates_like_python() {
+fn i18n_translates_unknown_keys_and_templates_like_rust_contract() {
     let original = get_locale();
 
     set_locale("en");
@@ -79,7 +79,7 @@ fn i18n_translates_unknown_keys_and_templates_like_python() {
 }
 
 #[test]
-fn i18n_detects_locale_from_env_order_like_python() {
+fn i18n_detects_locale_from_env_order_like_rust_contract() {
     assert_eq!(
         detect_locale_from_env_values([
             ("LC_ALL", Some("zh_TW.UTF-8")),

@@ -48,7 +48,7 @@ fn prompts_contain_entry_data_and_locale_specific_instructions() {
 }
 
 #[test]
-fn format_entry_includes_all_parts_like_python() {
+fn format_entry_includes_all_parts_like_rust_contract() {
     let entry = &sample_entries()[1];
     let formatted = format_entry(entry);
 

@@ -54,6 +54,29 @@ fn llama_artifact() -> ModelArtifact {
     }
 }
 
+fn giant_llama_artifact() -> ModelArtifact {
+    ModelArtifact {
+        source: "modelscope".to_string(),
+        model_id: "test/giant-llama".to_string(),
+        commit_sha: Some("giantsha".to_string()),
+        config: json!({
+            "model_type": "llama",
+            "architectures": ["LlamaForCausalLM"],
+            "num_hidden_layers": 80,
+            "hidden_size": 8192,
+            "vocab_size": 128256,
+            "num_attention_heads": 64,
+            "num_key_value_heads": 8,
+            "intermediate_size": 28672,
+            "max_position_embeddings": 1048576
+        }),
+        siblings: vec![SiblingFile {
+            filename: "model-00001-of-00001.safetensors".to_string(),
+            size: Some(6_000_000_000_000),
+        }],
+    }
+}
+
 fn evaluator() -> Evaluator {
     Evaluator::without_cache(Box::new(StaticSource {
         name: "huggingface",
@@ -61,8 +84,15 @@ fn evaluator() -> Evaluator {
     }))
 }
 
+fn giant_evaluator() -> Evaluator {
+    Evaluator::without_cache(Box::new(StaticSource {
+        name: "modelscope",
+        artifact: giant_llama_artifact(),
+    }))
+}
+
 #[test]
-fn evaluate_composes_python_pipeline_for_known_gpu() {
+fn evaluate_composes_rust_pipeline_for_known_gpu() {
     let report = evaluator()
         .evaluate(
             "test/llama-mini",
@@ -143,6 +173,27 @@ fn evaluate_embeds_unknown_gpu_error_without_aborting() {
         .unwrap_or("")
         .contains("Unknown GPU"));
     assert!(report.fleet.is_none());
+    assert!(report.generated_command.is_none());
+    assert!(report.prefill.is_none());
+    assert!(report.decode.is_none());
+    assert!(report.concurrency.is_none());
+}
+
+#[test]
+fn evaluate_does_not_emit_command_or_perf_when_no_candidate_fits() {
+    let report = giant_evaluator()
+        .evaluate(
+            "test/giant-llama",
+            "H100",
+            "vllm",
+            EvaluationOptions::default(),
+        )
+        .unwrap();
+
+    let fleet = report.fleet.as_ref().unwrap();
+    assert!(fleet.options.iter().all(|option| !option.fits));
+    assert_eq!(fleet.best_tier, None);
+    assert!(fleet.best_option().is_none());
     assert!(report.generated_command.is_none());
     assert!(report.prefill.is_none());
     assert!(report.decode.is_none());

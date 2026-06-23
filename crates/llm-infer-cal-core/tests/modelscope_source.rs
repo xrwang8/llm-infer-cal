@@ -179,7 +179,7 @@ fn fetch_uses_custom_endpoint_and_authorization_header() {
 }
 
 #[test]
-fn fetch_maps_file_list_status_errors_like_python() {
+fn fetch_maps_file_list_status_errors_like_rust_contract() {
     let mut not_found = FakeClient::new([
         json_resp(wrapped(json!({})), 200),
         json_resp(json!({"Code": 404, "Message": "model not found"}), 404),
@@ -219,7 +219,7 @@ fn fetch_maps_file_list_status_errors_like_python() {
 }
 
 #[test]
-fn fetch_maps_payload_and_config_errors_like_python() {
+fn fetch_maps_payload_and_config_errors_like_rust_contract() {
     let mut bad_files = FakeClient::new([
         json_resp(wrapped(json!({})), 200),
         json_resp(

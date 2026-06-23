@@ -48,6 +48,7 @@ fn fake_report(
                 head_dim: 512,
                 q_lora_rank: None,
                 kv_lora_rank: None,
+                qk_rope_head_dim: None,
                 compress_ratios: None,
                 nsa_topk: None,
             }),
@@ -84,6 +85,9 @@ fn prod_fleet(gpu_count: u64) -> FleetRecommendation {
         options: vec![FleetOption {
             tier: "prod",
             gpu_count,
+            tensor_parallel_size: gpu_count,
+            pipeline_parallel_size: 1,
+            node_count: 1,
             weight_bytes_per_gpu: 1,
             kv_bytes_per_request: 1,
             max_concurrent_at_reference_ctx: 1,
@@ -93,7 +97,7 @@ fn prod_fleet(gpu_count: u64) -> FleetRecommendation {
             reason_en: "test".to_string(),
             reason_zh: "test".to_string(),
         }],
-        best_tier: "prod",
+        best_tier: Some("prod"),
         valid_tp_sizes: vec![1, 2, 4, 8],
         constraint_note_en: String::new(),
         constraint_note_zh: String::new(),
@@ -101,7 +105,7 @@ fn prod_fleet(gpu_count: u64) -> FleetRecommendation {
 }
 
 #[test]
-fn evaluate_field_matches_python_pass_fail_skip_rules() {
+fn evaluate_field_matches_rust_contract_pass_fail_skip_rules() {
     let report = fake_report(
         AttentionVariant::CsaHca,
         QuantizationScheme::Fp4Fp8Mixed,
@@ -167,7 +171,7 @@ fn evaluate_field_matches_python_pass_fail_skip_rules() {
 }
 
 #[test]
-fn evaluate_field_handles_fleet_checks_like_python() {
+fn evaluate_field_handles_fleet_checks_like_rust_contract() {
     let no_fleet = fake_report(
         AttentionVariant::Gqa,
         QuantizationScheme::Fp16,
@@ -230,7 +234,7 @@ fn bundled_dataset_loads_and_cites_every_expectation() {
 }
 
 #[test]
-fn exit_code_matches_python_rules() {
+fn exit_code_matches_rust_contract_rules() {
     assert_eq!(
         exit_code_from(&[
             CheckResult::new("a", "f1", Status::Pass, "", "", "src"),

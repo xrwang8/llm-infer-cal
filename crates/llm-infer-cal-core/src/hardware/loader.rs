@@ -3,7 +3,7 @@ use std::fmt;
 
 use serde::Deserialize;
 
-const GPU_DATABASE_YAML: &str = include_str!("../../../../src/llm_cal/hardware/gpu_database.yaml");
+const GPU_DATABASE_YAML: &str = include_str!("../../../../data/hardware/gpu_database.yaml");
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct GPUSpec {

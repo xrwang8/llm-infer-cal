@@ -54,7 +54,7 @@ fn build_safetensors_bytes(header: serde_json::Value) -> Vec<u8> {
 }
 
 #[test]
-fn pick_sample_shard_matches_python_preference_order() {
+fn pick_sample_shard_matches_rust_contract_preference_order() {
     let single = vec![
         sibling("model-00001-of-00010.safetensors", 1000),
         sibling("model.safetensors", 100),

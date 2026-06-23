@@ -1,19 +1,24 @@
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::{needs_trust_remote_code, render_flag};
+use crate::command_generator::{needs_trust_remote_code, render_flag, Parallelism};
 use crate::engine_compat::EngineCompatEntry;
 
 pub fn generate_sglang_command(
     model_id: &str,
     profile: &ArchitectureProfile,
-    tensor_parallel_size: u64,
+    parallelism: Parallelism,
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
 ) -> String {
     let mut lines = vec![
         "python -m sglang.launch_server".to_string(),
         format!("  --model-path {model_id}"),
-        format!("  --tp {tensor_parallel_size}"),
+        format!("  --tp {}", parallelism.total_gpus),
     ];
+    if parallelism.node_count() > 1 {
+        lines.push("  --dist-init-addr ${NODE0_IP:-<node0-ip>}:20000".to_string());
+        lines.push(format!("  --nnodes {}", parallelism.node_count()));
+        lines.push("  --node-rank ${NODE_RANK:-0}".to_string());
+    }
 
     let effective_max = max_model_len.or_else(|| {
         profile

@@ -35,6 +35,7 @@ pub fn detect_attention(config: &Value) -> AttentionTraits {
 
     let q_lora = get_truthy_u64(config, "q_lora_rank");
     let kv_lora = get_truthy_u64(config, "kv_lora_rank");
+    let qk_rope_head_dim = get_truthy_u64(config, "qk_rope_head_dim");
     let compress_ratios = get(config, "compress_ratios")
         .and_then(Value::as_array)
         .map(|values| values.iter().filter_map(value_to_u64).collect::<Vec<_>>());
@@ -51,6 +52,7 @@ pub fn detect_attention(config: &Value) -> AttentionTraits {
                 head_dim,
                 q_lora_rank: q_lora,
                 kv_lora_rank: kv_lora,
+                qk_rope_head_dim,
                 compress_ratios: Some(ratios),
                 nsa_topk: None,
             };
@@ -74,6 +76,7 @@ pub fn detect_attention(config: &Value) -> AttentionTraits {
             head_dim,
             q_lora_rank: None,
             kv_lora_rank: None,
+            qk_rope_head_dim: None,
             compress_ratios: None,
             nsa_topk,
         };
@@ -87,6 +90,7 @@ pub fn detect_attention(config: &Value) -> AttentionTraits {
             head_dim,
             q_lora_rank: q_lora,
             kv_lora_rank: kv_lora,
+            qk_rope_head_dim,
             compress_ratios: None,
             nsa_topk: None,
         };
@@ -104,6 +108,7 @@ pub fn detect_attention(config: &Value) -> AttentionTraits {
             head_dim,
             q_lora_rank: None,
             kv_lora_rank: None,
+            qk_rope_head_dim: None,
             compress_ratios: None,
             nsa_topk: None,
         };
@@ -116,6 +121,7 @@ pub fn detect_attention(config: &Value) -> AttentionTraits {
         head_dim,
         q_lora_rank: None,
         kv_lora_rank: None,
+        qk_rope_head_dim: None,
         compress_ratios: None,
         nsa_topk: None,
     }

@@ -36,13 +36,14 @@ fn gqa_attention() -> AttentionTraits {
         head_dim: 128,
         q_lora_rank: None,
         kv_lora_rank: None,
+        qk_rope_head_dim: None,
         compress_ratios: None,
         nsa_topk: None,
     }
 }
 
 #[test]
-fn standard_gqa_kv_formula_matches_python() {
+fn standard_gqa_kv_formula_matches_rust_contract() {
     let profile = base_profile(Some(gqa_attention()));
 
     let kv = compute_kv_cache_bytes(&profile, 2048, 2);
@@ -90,6 +91,7 @@ fn csa_hca_kv_uses_average_compress_ratio() {
         head_dim: 512,
         q_lora_rank: None,
         kv_lora_rank: None,
+        qk_rope_head_dim: None,
         compress_ratios: Some(ratios.clone()),
         nsa_topk: None,
     }));
@@ -129,6 +131,7 @@ fn csa_hca_scales_linearly_with_context() {
         head_dim: 512,
         q_lora_rank: None,
         kv_lora_rank: None,
+        qk_rope_head_dim: None,
         compress_ratios: Some(ratios),
         nsa_topk: None,
     }));
@@ -150,6 +153,7 @@ fn mla_uses_kv_lora_rank() {
         head_dim: 128,
         q_lora_rank: Some(1536),
         kv_lora_rank: Some(512),
+        qk_rope_head_dim: None,
         compress_ratios: None,
         nsa_topk: None,
     }));
@@ -161,6 +165,27 @@ fn mla_uses_kv_lora_rank() {
     let kv = compute_kv_cache_bytes(&profile, 8192, 2);
 
     assert_eq!(kv.value, 512_u64 * 2 * 8192 * 60);
+}
+
+#[test]
+fn mla_kv_includes_decoupled_rope_key_dim() {
+    let mut profile = base_profile(Some(AttentionTraits {
+        variant: AttentionVariant::Mla,
+        num_heads: 64,
+        num_kv_heads: 64,
+        head_dim: 192,
+        q_lora_rank: Some(2048),
+        kv_lora_rank: Some(512),
+        qk_rope_head_dim: Some(64),
+        compress_ratios: None,
+        nsa_topk: None,
+    }));
+    profile.model_type = "glm_moe_dsa".to_string();
+    profile.num_hidden_layers = 78;
+
+    let kv = compute_kv_cache_bytes(&profile, 8192, 2);
+
+    assert_eq!(kv.value, (512_u64 + 64) * 2 * 8192 * 78);
 }
 
 #[test]
@@ -187,7 +212,7 @@ fn unknown_and_state_space_kv_return_unknown() {
 }
 
 #[test]
-fn dense_weight_estimate_uses_python_formula() {
+fn dense_weight_estimate_uses_rust_formula() {
     let mut profile = base_profile(Some(AttentionTraits {
         variant: AttentionVariant::Gqa,
         num_heads: 4,
@@ -195,6 +220,7 @@ fn dense_weight_estimate_uses_python_formula() {
         head_dim: 8,
         q_lora_rank: None,
         kv_lora_rank: None,
+        qk_rope_head_dim: None,
         compress_ratios: None,
         nsa_topk: None,
     }));
@@ -229,7 +255,7 @@ fn moe_weight_estimate_counts_all_experts() {
 }
 
 #[test]
-fn predicted_bytes_under_quant_matches_python_bpp_table() {
+fn predicted_bytes_under_quant_matches_rust_contract_bpp_table() {
     let fp16 = predicted_bytes_under_quant(70_000_000_000, "FP16");
     let mixed = predicted_bytes_under_quant(284_000_000_000, "FP4_FP8_MIXED");
     let unknown = predicted_bytes_under_quant(1_000_000, "UNKNOWN");

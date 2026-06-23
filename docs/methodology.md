@@ -11,13 +11,13 @@ citation, please open a PR.
 These are **derived from public data**, no empirical factors:
 
 ### Weight bytes
-**Formula**: sum of `safetensors` file sizes from HF `model_info().siblings`.
+**Formula**: sum of `safetensors` file sizes from the selected model source
+(HuggingFace or ModelScope).
 
 **Label**: `[verified]`.
 
-**Why trustworthy**: direct read from HuggingFace's own API. No estimation
-step. The file sizes are exactly what you'd `wget` if you downloaded the
-model.
+**Why trustworthy**: direct read from the source file metadata. No estimation
+step. The file sizes are the bytes you download with the model weights.
 
 ### KV cache per request
 **Formula (standard attention)**:
@@ -26,8 +26,15 @@ per_token_per_layer_bytes = 2 × num_kv_heads × head_dim × dtype_bytes
 total_bytes = per_token_per_layer_bytes × seq_len × num_layers
 ```
 
-**Formula (MLA)**: uses `kv_lora_rank` instead of `num_kv_heads × head_dim`
-(DeepSeek's compressed KV representation).
+**Formula (MLA)**:
+```
+per_token_per_layer_bytes = (kv_lora_rank + qk_rope_head_dim) × dtype_bytes
+total_bytes = per_token_per_layer_bytes × seq_len × num_layers
+```
+
+The `kv_lora_rank` part is the compressed latent KV. `qk_rope_head_dim` covers
+the decoupled RoPE key dimension used by MLA-style models that expose it in
+config.
 
 **Formula (CSA+HCA / NSA)**: baseline × per-layer compression factor from
 `compress_ratios` array.
@@ -39,23 +46,27 @@ quantization) that may differ from the baseline assumption.
 - Standard attention KV formula: universally cited in transformer inference
   literature.
 - MLA details: DeepSeek-V2 paper (DeepSeek-AI, 2024-05)
-- CSA+HCA details: DeepSeek-V4 technical report + HF config.json
+- CSA+HCA details: DeepSeek-V4 technical report + model config.json
   `compress_ratios` field semantics.
 
-### TP-aware KV sharding
+### TP/PP-aware KV sharding
 **Formula**:
 ```
-per_gpu_KV = total_KV / min(tp_size, num_kv_heads)
+tp_kv_shards = 1                          # MLA
+tp_kv_shards = min(tp_size, num_kv_heads) # MQA/GQA/MHA
+effective_kv_shards = pp_size × tp_kv_shards
+per_gpu_KV = total_KV / effective_kv_shards
 ```
 
-**Source**: vLLM TP implementation. For MQA (kv_heads=1), KV always
-replicates; for GQA with kv_heads=G, it splits up to G ways. Matches
-vLLM's actual sharding behavior, which we verified by reading
-`vllm/model_executor/layers/rotary_embedding.py` and related TP code.
+**Source**: vLLM TP implementation for KV splitting, plus vLLM/SGLang launch
+conventions for multi-node TP/PP deployments. For MQA (kv_heads=1), KV
+replicates across TP ranks. For GQA with kv_heads=G, it splits up to G ways.
+For MLA, the latent KV cache is not split by TP in the planner; PP stages still
+divide the layer stack.
 
-**Why this matters**: prior versions of llm-infer-cal (and SelfHostLLM today)
-assumed full replication, which overestimates KV pressure for GQA models
-by up to 8×.
+**Why this matters**: single-node-only planning can report an impossible
+8-GPU fit for very large models. TP/PP planning makes the failure visible and
+then searches larger valid layouts such as `TP8 × PP6`.
 
 ---
 

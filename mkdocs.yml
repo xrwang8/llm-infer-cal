@@ -1,9 +1,6 @@
 site_name: llm-infer-cal
 site_description: LLM inference hardware calculator — architecture-aware, engine-version-aware, honest-labeled.
 site_url: https://xrwang8.github.io/llm-infer-cal/
-repo_url: https://github.com/xrwang8/llm-infer-cal
-repo_name: xrwang8/llm-infer-cal
-edit_uri: edit/main/docs/
 
 theme:
   name: material
@@ -35,9 +32,6 @@ theme:
     - content.code.copy
     - content.code.annotate
     - content.tabs.link
-  icon:
-    repo: fontawesome/brands/github
-
 nav:
   - English:
       - Home: index.md
@@ -87,8 +81,3 @@ validation:
     omitted_files: ignore
   links:
     not_found: warn
-
-extra:
-  social:
-    - icon: fontawesome/brands/github
-      link: https://github.com/xrwang8/llm-infer-cal

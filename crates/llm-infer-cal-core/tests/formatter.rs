@@ -94,8 +94,39 @@ fn unknown_warning_report() -> llm_infer_cal_core::core::evaluator::EvaluationRe
         .unwrap()
 }
 
+fn no_fit_report() -> llm_infer_cal_core::core::evaluator::EvaluationReport {
+    let artifact = ModelArtifact {
+        source: "modelscope".to_string(),
+        model_id: "test/giant-llama".to_string(),
+        commit_sha: Some("giantsha".to_string()),
+        config: json!({
+            "model_type": "llama",
+            "architectures": ["LlamaForCausalLM"],
+            "num_hidden_layers": 80,
+            "hidden_size": 8192,
+            "vocab_size": 128256,
+            "num_attention_heads": 64,
+            "num_key_value_heads": 8,
+            "intermediate_size": 28672,
+            "max_position_embeddings": 1048576
+        }),
+        siblings: vec![SiblingFile {
+            filename: "model-00001-of-00001.safetensors".to_string(),
+            size: Some(6_000_000_000_000),
+        }],
+    };
+    Evaluator::without_cache(Box::new(StaticSource { artifact }))
+        .evaluate(
+            "test/giant-llama",
+            "H100",
+            "vllm",
+            EvaluationOptions::default(),
+        )
+        .unwrap()
+}
+
 #[test]
-fn helper_formatting_matches_python_formatter() {
+fn helper_formatting_matches_rust_contract_formatter() {
     let _guard = locale_lock();
     set_locale("en");
     assert_eq!(fmt_bytes(999), "999 B");
@@ -147,6 +178,20 @@ fn render_report_text_does_not_quote_warning_strings() {
 
     assert!(rendered.contains("WARNING: No recognizable model_type"));
     assert!(!rendered.contains("WARNING: \"No recognizable model_type"));
+}
+
+#[test]
+fn render_report_text_does_not_recommend_or_generate_command_when_no_candidate_fits() {
+    let _guard = locale_lock();
+    set_locale("zh");
+    let rendered = render_report_text(&no_fit_report());
+
+    assert!(rendered.contains("推荐 GPU 张数 - H100"));
+    assert!(rendered.contains("没有推荐档位：模型无法放入当前 TP/PP 候选配置。"));
+    assert!(!rendered.contains("生产 *"));
+    assert!(!rendered.contains("= 推荐档位"));
+    assert!(!rendered.contains("性能分析"));
+    assert!(!rendered.contains("生成的启动命令"));
 }
 
 #[test]

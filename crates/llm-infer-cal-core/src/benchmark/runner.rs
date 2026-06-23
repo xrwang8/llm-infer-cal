@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::core::evaluator::{EvaluationReport, Evaluator};
 
-const DATASET_YAML: &str = include_str!("../../../../src/llm_cal/benchmark/dataset.yaml");
+const DATASET_YAML: &str = include_str!("../../../../data/benchmark/dataset.yaml");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Status {

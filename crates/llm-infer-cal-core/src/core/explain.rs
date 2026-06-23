@@ -1,5 +1,6 @@
 use crate::architecture::profile::{ArchitectureProfile, AttentionVariant};
 use crate::core::evaluator::EvaluationReport;
+use crate::fleet::planner::effective_kv_shards;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplainInput {
@@ -72,10 +73,10 @@ fn weight_bytes(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
     let w = &report.weight.total_bytes;
     let mut entry = ExplainEntry::new(
         "Weight bytes (safetensors file sum)",
-        "sum(sibling.size for sibling in HF model_info(files_metadata=True).siblings if sibling.endswith('.safetensors'))",
+        "sum(file.size for file in model_source.file_metadata if file.endswith('.safetensors'))",
     );
     entry.inputs.push(ExplainInput::new(
-        "HF model_info API",
+        "model source API",
         format!(
             "source={}, sha={}",
             report.source,
@@ -163,12 +164,14 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
             && attn.kv_lora_rank.unwrap_or(0) > 0
         {
             let rank = attn.kv_lora_rank.unwrap_or(0);
+            let rope_dim = attn.qk_rope_head_dim.unwrap_or(0);
             (
-                rank * 2,
-                "per_tok_per_layer = kv_lora_rank x dtype_bytes   (MLA: compressed latent KV)"
+                (rank + rope_dim) * 2,
+                "per_tok_per_layer = (kv_lora_rank + qk_rope_head_dim) x dtype_bytes   (MLA: latent KV plus decoupled RoPE key)"
                     .to_string(),
                 vec![
                     ExplainInput::new("kv_lora_rank", rank.to_string(), "[verified]"),
+                    ExplainInput::new("qk_rope_head_dim", rope_dim.to_string(), "[verified]"),
                     ExplainInput::with_note("dtype_bytes", "2", "[verified]", "BF16/FP16"),
                     ExplainInput::new("seq_len", fmt_u64(*ctx), "[verified]"),
                     ExplainInput::new(
@@ -267,28 +270,43 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
             "prod" => 16,
             _ => 1,
         };
+        let layout = if opt.pipeline_parallel_size > 1 {
+            format!(
+                "TP{} x PP{} ({} nodes)",
+                opt.tensor_parallel_size, opt.pipeline_parallel_size, opt.node_count
+            )
+        } else {
+            format!("TP{}", opt.tensor_parallel_size)
+        };
+        let effective_shards = effective_kv_shards(&report.profile, opt.gpu_count);
+        let kv_per_gpu = ceil_div(opt.kv_bytes_per_request, effective_shards.max(1));
         let mut steps = vec![
             format!(
                 "per-GPU HBM usable (@ 90% util) = {} bytes",
                 fmt_u64(opt.usable_bytes_per_gpu)
             ),
+            format!("parallel layout = {layout}"),
             format!(
-                "weight per GPU = total_weight / TP_size = {} / {} = {} bytes",
+                "weight per GPU = total_weight / total_gpus = {} / {} = {} bytes",
                 fmt_u64(report.weight.total_bytes.value),
                 opt.gpu_count,
                 fmt_u64(opt.weight_bytes_per_gpu)
+            ),
+            format!(
+                "per-GPU KV @ 128K = total_KV / effective_kv_shards = {} / {} = {} bytes",
+                fmt_u64(opt.kv_bytes_per_request),
+                effective_shards,
+                fmt_u64(kv_per_gpu)
             ),
             format!(
                 "headroom per GPU = usable - weight = {} bytes ({:.2} GB)",
                 fmt_u64(headroom),
                 headroom as f64 / 1e9
             ),
+            format!("tier criterion: headroom >= {fit_criterion} x per_gpu_kv_per_request_128K"),
             format!(
-                "tier criterion: headroom >= weight_per_gpu + {fit_criterion} x kv_per_request_128K"
-            ),
-            format!(
-                "smallest TP count in {:?} that satisfies the criterion: {}",
-                fleet.valid_tp_sizes, opt.gpu_count
+                "selected smallest candidate satisfying the criterion: {} GPUs ({layout})",
+                opt.gpu_count
             ),
         ];
         if !opt.fits {
@@ -300,7 +318,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
 
         let mut entry = ExplainEntry::new(
             &format!("Fleet tier: {} ({} GPUs)", opt.tier, opt.gpu_count),
-            "smallest TP in valid_set where weight_per_gpu + concurrent x kv_per_request <= usable_per_gpu",
+            "smallest TP/PP candidate where weight_per_gpu + concurrent x per_gpu_kv_per_request <= usable_per_gpu",
         );
         entry.inputs = vec![
             ExplainInput::new(
@@ -314,6 +332,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
                 "[estimated]",
                 "divisors of num_attention_heads capped at 8 (single node)",
             ),
+            ExplainInput::new("selected_layout", layout, "[estimated]"),
             ExplainInput::new(
                 "GPU memory_gb",
                 format!("{} GB", gpu_spec.memory_gb),
@@ -323,9 +342,9 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
         entry.steps = steps;
         entry.result = format!("{} GPUs, fit={}", opt.gpu_count, opt.fits);
         entry.source =
-            "vLLM --gpu-memory-utilization 0.9 convention; TP divisibility required by vLLM/SGLang"
+            "vLLM --gpu-memory-utilization 0.9 convention; TP divisibility and PP layer divisibility follow vLLM/SGLang launch constraints"
                 .to_string();
-        entry.methodology_anchor = "#tp-aware-kv-sharding".to_string();
+        entry.methodology_anchor = "#tppp-aware-kv-sharding".to_string();
         entries.push(entry);
     }
 }
@@ -349,7 +368,7 @@ fn prefill(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
             "params",
             fmt_u64(report.total_params_estimate.value),
             "[estimated]",
-            "from architecture formula (see weight.py)",
+            "from Rust architecture weight formula",
         ),
         ExplainInput::new("input_tokens", fmt_u64(input_tokens), "[user-set]"),
         ExplainInput::with_note(
@@ -486,7 +505,7 @@ fn concurrency(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
             "per_GPU_kv_bytes_per_request",
             fmt_u64(concurrency.k_source_kv_per_req_bytes),
             "[estimated]",
-            "post-TP-sharding via min(tp, num_kv_heads)",
+            "post TP/PP sharding; MLA uses one TP KV shard and PP splits by pipeline stage",
         ),
     ];
     k_entry.steps = vec![format!(
@@ -499,7 +518,8 @@ fn concurrency(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
         "K = {} [{}]",
         concurrency.k_bound.value, concurrency.k_bound.label
     );
-    k_entry.source = "TP sharding rule from vLLM source code (verified)".to_string();
+    k_entry.source =
+        "TP KV sharding rule plus vLLM/SGLang multi-node TP/PP launch conventions".to_string();
     k_entry.methodology_anchor = "#k-bound-memory-capacity".to_string();
     entries.push(k_entry);
 
@@ -579,10 +599,7 @@ fn concurrency(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
 
 fn chosen_gpu_count(fleet: &crate::fleet::planner::FleetRecommendation) -> u64 {
     fleet
-        .options
-        .iter()
-        .find(|option| option.tier == fleet.best_tier)
-        .or_else(|| fleet.options.first())
+        .best_option()
         .map(|option| option.gpu_count)
         .unwrap_or(1)
 }
@@ -599,6 +616,13 @@ fn average_keep_fraction(ratios: &[u64]) -> f64 {
         })
         .sum::<f64>();
     total / ratios.len() as f64
+}
+
+fn ceil_div(numerator: u64, denominator: u64) -> u64 {
+    if denominator == 0 {
+        return 0;
+    }
+    numerator.div_ceil(denominator)
 }
 
 fn fmt_ctx(ctx: u64) -> String {

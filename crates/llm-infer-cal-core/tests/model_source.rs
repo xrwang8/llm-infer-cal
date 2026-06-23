@@ -35,7 +35,7 @@ fn model_artifact_and_sibling_file_preserve_source_data() {
 }
 
 #[test]
-fn auth_token_priority_matches_python() {
+fn auth_token_priority_matches_rust_contract() {
     let hf = HashMap::from([
         ("HF_TOKEN", Some("hf-primary")),
         ("HUGGING_FACE_HUB_TOKEN", Some("hf-legacy")),
@@ -72,7 +72,7 @@ fn auth_token_priority_matches_python() {
 }
 
 #[test]
-fn auth_error_messages_match_user_facing_python_text() {
+fn auth_error_messages_match_user_facing_text() {
     let hf = hf_auth_error_message("meta/llama");
     let ms = modelscope_auth_error_message("Qwen/Qwen3");
 

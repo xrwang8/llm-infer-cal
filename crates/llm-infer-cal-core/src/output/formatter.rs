@@ -505,7 +505,7 @@ fn render_fleet(report: &EvaluationReport, out: &mut Vec<String>) {
         let headroom = opt
             .usable_bytes_per_gpu
             .saturating_sub(opt.weight_bytes_per_gpu);
-        let marker = if opt.tier == fleet.best_tier {
+        let marker = if fleet.best_tier == Some(opt.tier) {
             " *"
         } else {
             ""
@@ -522,6 +522,12 @@ fn render_fleet(report: &EvaluationReport, out: &mut Vec<String>) {
                 "-".to_string()
             }
         );
+        if opt.pipeline_parallel_size > 1 {
+            line.push_str(&format!(
+                ", layout TP{}xPP{} ({} nodes)",
+                opt.tensor_parallel_size, opt.pipeline_parallel_size, opt.node_count
+            ));
+        }
         for ctx in &ctx_cols {
             let concurrent = opt
                 .max_concurrent_by_context
@@ -553,7 +559,11 @@ fn render_fleet(report: &EvaluationReport, out: &mut Vec<String>) {
         &fleet.constraint_note_en
     };
     out.push(format!("{} {}", t("fleet.constraint"), note));
-    out.push(format!("* {}", t("fleet.best_marker")));
+    if fleet.best_tier.is_some() {
+        out.push(format!("* {}", t("fleet.best_marker")));
+    } else {
+        out.push(t("fleet.no_recommended_tier"));
+    }
 }
 
 fn render_performance(report: &EvaluationReport, out: &mut Vec<String>) {
@@ -657,12 +667,7 @@ fn render_command(report: &EvaluationReport, out: &mut Vec<String>) {
     let (Some(command), Some(fleet)) = (&report.generated_command, &report.fleet) else {
         return;
     };
-    let best = fleet
-        .options
-        .iter()
-        .find(|option| option.tier == fleet.best_tier)
-        .or_else(|| fleet.options.first());
-    let Some(best) = best else {
+    let Some(best) = fleet.best_option() else {
         return;
     };
     out.push(String::new());

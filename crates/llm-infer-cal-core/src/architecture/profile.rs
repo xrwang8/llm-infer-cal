@@ -67,6 +67,7 @@ pub struct AttentionTraits {
     pub head_dim: u64,
     pub q_lora_rank: Option<u64>,
     pub kv_lora_rank: Option<u64>,
+    pub qk_rope_head_dim: Option<u64>,
     pub compress_ratios: Option<Vec<u64>>,
     pub nsa_topk: Option<u64>,
 }

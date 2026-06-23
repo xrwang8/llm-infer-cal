@@ -39,7 +39,7 @@ fn temp_cache_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn cache_key_string_matches_python() {
+fn cache_key_string_matches_rust_contract() {
     assert_eq!(
         CacheKey::new("huggingface", "foo/bar", Some("abc")).to_string(),
         "huggingface::foo/bar::abc"
@@ -51,7 +51,7 @@ fn cache_key_string_matches_python() {
 }
 
 #[test]
-fn set_then_get_and_bypass_match_python() {
+fn set_then_get_and_bypass_match_rust_contract() {
     let dir = temp_cache_dir("basic");
     let cache = ArtifactCache::new(Some(&dir), 7 * 24 * 60 * 60).unwrap();
     let key = CacheKey::new("huggingface", "foo/bar", Some("abc"));
@@ -66,7 +66,7 @@ fn set_then_get_and_bypass_match_python() {
 }
 
 #[test]
-fn misses_and_invalidate_match_python() {
+fn misses_and_invalidate_match_rust_contract() {
     let dir = temp_cache_dir("invalidate");
     let cache = ArtifactCache::new(Some(&dir), 7 * 24 * 60 * 60).unwrap();
     let key = CacheKey::new("huggingface", "foo/bar", Some("abc"));

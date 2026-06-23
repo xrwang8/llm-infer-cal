@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::engine_compat::EngineCompatEntry;
 
-const MATRIX_YAML: &str = include_str!("../../../../src/llm_cal/engine_compat/matrix.yaml");
+const MATRIX_YAML: &str = include_str!("../../../../data/engine_compat/matrix.yaml");
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct EngineCompatMatrix {

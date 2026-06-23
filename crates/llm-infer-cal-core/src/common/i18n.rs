@@ -226,6 +226,10 @@ fn message(key: &str) -> Option<(&'static str, &'static str)> {
         "fleet.tier.dev" => Some(("dev", "开发")),
         "fleet.tier.prod" => Some(("prod", "生产")),
         "fleet.best_marker" => Some(("= recommended", "= 推荐档位")),
+        "fleet.no_recommended_tier" => Some((
+            "No recommended tier: the model does not fit on the available TP/PP candidates.",
+            "没有推荐档位：模型无法放入当前 TP/PP 候选配置。",
+        )),
         "fleet.constraint" => Some(("constraint:", "约束：")),
         "fleet.forced" => Some((
             "Forced GPU count (--gpu-count was set)",

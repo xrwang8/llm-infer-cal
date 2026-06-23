@@ -36,7 +36,7 @@ fn render_tag_uses_bracket_format() {
 }
 
 #[test]
-fn label_displays_like_python_str_enum() {
+fn label_displays_like_rust_contract_str_enum() {
     assert_eq!(Label::Verified.as_str(), "verified");
     assert_eq!(Label::Cited.to_string(), "cited");
 }
