@@ -19,11 +19,17 @@ htmlcov/
 coverage.xml
 .hypothesis/
 target/
+.playwright-cli/
+output/playwright/
 
 # Type checkers
 .mypy_cache/
 .ruff_cache/
 .pyright/
+*.tsbuildinfo
+
+# Node / frontend
+node_modules/
 
 # Virtual envs
 .venv/

@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/llm-infer-cal", "crates/llm-infer-cal-core"]
+members = [
+    "crates/llm-infer-cal",
+    "crates/llm-infer-cal-core",
+    "crates/llm-infer-cal-web",
+]
 resolver = "2"
 
 [workspace.package]
