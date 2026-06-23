@@ -10,7 +10,7 @@ use llm_infer_cal_core::model_source::base::{
 };
 use llm_infer_cal_core::output::formatter::{
     fmt_bytes, fmt_params, format_tag, render_explain_text, render_gpu_list_text,
-    render_llm_review_text, render_report_text,
+    render_llm_review_text, render_report_json, render_report_text,
 };
 use llm_infer_cal_core::output::labels::{AnnotatedValue, Label};
 use serde_json::json;
@@ -168,6 +168,42 @@ fn render_report_text_contains_core_sections_and_localized_values() {
     assert!(!rendered.contains("Assumptions:"));
     assert!(rendered.contains("生成的启动命令"));
     assert!(rendered.contains("标签："));
+}
+
+#[test]
+fn render_report_json_is_stable_for_frontend_and_service_consumers() {
+    let _guard = locale_lock();
+    set_locale("zh");
+    let rendered = render_report_json(&report()).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+    assert_eq!(json["schema_version"], "llm-infer-cal.report/v1");
+    assert_eq!(json["language"], "zh");
+    assert_eq!(json["model"]["id"], "test/llama-mini");
+    assert_eq!(json["model"]["source"], "huggingface");
+    assert_eq!(json["architecture"]["model_type"]["value"], "llama");
+    assert_eq!(
+        json["weights"]["safetensors_total_bytes"]["value"],
+        10_944_u64
+    );
+    assert_eq!(json["kv_cache_by_context"][0]["context_tokens"], 4_096_u64);
+    assert_eq!(json["hardware"]["id"], "H800");
+    assert_eq!(json["fleet"]["best_tier"], "dev");
+    assert_eq!(json["generated_command"]["engine"], "vllm");
+    assert_eq!(json["generated_command"]["tier"], "dev");
+    assert_eq!(
+        json["generated_command"]["lines"][0],
+        "vllm serve test/llama-mini"
+    );
+    assert!(json["generated_command"]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|line| line == "--tensor-parallel-size 1"));
+    assert_eq!(
+        json["performance"]["concurrency"]["max_concurrent"]["label"],
+        "estimated"
+    );
 }
 
 #[test]

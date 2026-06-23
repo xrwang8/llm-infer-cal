@@ -28,6 +28,66 @@ fn engine_matrix_loads_and_matches_deepseek_v4() {
 }
 
 #[test]
+fn engine_matrix_carries_qwen36_recipe_flags() {
+    let matrix = load_matrix().unwrap();
+
+    let vllm = find_match("vllm", "qwen3_5_moe_text", None, Some(&matrix)).unwrap();
+    assert_eq!(vllm.version_spec, ">=0.17.0");
+    assert!(has_flag(
+        &vllm.required_flags,
+        "--enable-auto-tool-choice",
+        None
+    ));
+    assert!(has_flag(
+        &vllm.required_flags,
+        "--tool-call-parser",
+        Some("qwen3_xml")
+    ));
+    assert!(has_flag(
+        &vllm.required_flags,
+        "--reasoning-parser",
+        Some("qwen3")
+    ));
+    assert!(has_flag(
+        &vllm.required_flags,
+        "--mm-encoder-tp-mode",
+        Some("data")
+    ));
+
+    let sglang = find_match("sglang", "qwen3_5_moe_text", None, Some(&matrix)).unwrap();
+    assert_eq!(sglang.version_spec, ">=0.5.10");
+    assert!(has_flag(
+        &sglang.required_flags,
+        "--reasoning-parser",
+        Some("qwen3")
+    ));
+    assert!(has_flag(
+        &sglang.required_flags,
+        "--tool-call-parser",
+        Some("qwen3_coder")
+    ));
+    assert!(has_flag(
+        &sglang.required_flags,
+        "--speculative-algorithm",
+        Some("EAGLE")
+    ));
+    assert!(has_flag(
+        &sglang.required_flags,
+        "--mamba-scheduler-strategy",
+        Some("extra_buffer")
+    ));
+    assert!(has_flag(
+        &sglang.required_flags,
+        "--mem-fraction-static",
+        Some("0.8")
+    ));
+    assert!(sglang
+        .env
+        .iter()
+        .any(|env| env.name == "SGLANG_ENABLE_SPEC_V2" && env.value == "1"));
+}
+
+#[test]
 fn engine_find_match_respects_version_and_case_like_rust_contract() {
     let current = find_match("VLLM", "DEEPSEEK_V4", Some("0.19.0"), None).unwrap();
     let older = find_match("vllm", "deepseek_v4", Some("0.18.0"), None);
@@ -38,6 +98,16 @@ fn engine_find_match_respects_version_and_case_like_rust_contract() {
     assert!(older.is_none());
     assert_eq!(invalid.matches_model_type, "deepseek_v4");
     assert!(unknown.is_none());
+}
+
+fn has_flag(
+    flags: &[llm_infer_cal_core::engine_compat::EngineFlag],
+    flag: &str,
+    value: Option<&str>,
+) -> bool {
+    flags
+        .iter()
+        .any(|entry| entry.flag == flag && entry.value.as_deref() == value)
 }
 
 #[test]

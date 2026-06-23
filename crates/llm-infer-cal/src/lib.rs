@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use llm_infer_cal_core::benchmark::runner::{
     exit_code_from, load_dataset, run_all, CheckResult, Status,
 };
@@ -11,6 +11,7 @@ use llm_infer_cal_core::core::explain::build as build_explain;
 use llm_infer_cal_core::hardware::loader::load_database;
 use llm_infer_cal_core::llm_review::reviewer::run_review;
 use llm_infer_cal_core::model_source::base::{ModelSource, ModelSourceError};
+use llm_infer_cal_core::model_source::builtin::BuiltinSource;
 use llm_infer_cal_core::model_source::huggingface::HuggingFaceSource;
 use llm_infer_cal_core::model_source::modelscope::{ModelScopeSource, DEFAULT_REVISION};
 use llm_infer_cal_core::output::formatter::{
@@ -60,7 +61,11 @@ Options:
       --llm-review
           EXPERIMENTAL: send the derivation trace to an LLM for a second opinion
       --source <SOURCE>
-          Model source: huggingface (default) | modelscope [default: huggingface]
+          Model source: builtin | huggingface (default) | modelscope [default: huggingface]
+      --format <FORMAT>
+          Output format: text | json [default: text]
+      --json
+          Shortcut for --format json
       --install-completion <SHELL>
           Print portable shell completion install instructions
       --show-completion <SHELL>
@@ -88,6 +93,8 @@ const COMPLETION_OPTIONS: &[&str] = &[
     "--explain",
     "--llm-review",
     "--source",
+    "--format",
+    "--json",
     "--install-completion",
     "--show-completion",
     "--help",
@@ -178,9 +185,23 @@ struct Cli {
     #[arg(long = "llm-review")]
     llm_review: bool,
 
-    /// Model source: huggingface (default) | modelscope.
+    /// Model source: builtin | huggingface (default) | modelscope.
     #[arg(long, default_value = "huggingface")]
     source: String,
+
+    /// Output format: text | json.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    format: OutputFormat,
+
+    /// Shortcut for --format json.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
 }
 
 pub fn run_with_args<I, S>(_args: I) -> CliExit
@@ -275,6 +296,18 @@ where
         Err(error) => return source_error_exit(error),
     };
 
+    let output_format = if cli.json {
+        OutputFormat::Json
+    } else {
+        cli.format
+    };
+    if output_format == OutputFormat::Json {
+        return match llm_infer_cal_core::output::formatter::render_report_json(&report) {
+            Ok(json) => CliExit::ok(with_newline(json)),
+            Err(error) => CliExit::err(1, format!("failed to render JSON: {error}\n")),
+        };
+    }
+
     let mut stdout = render_report_text(&report);
     let explain_entries = if cli.explain || cli.llm_review {
         build_explain(&report)
@@ -315,6 +348,7 @@ impl CliExit {
 
 fn source_from_name(name: &str, timeout_s: f64) -> Result<Box<dyn ModelSource>, String> {
     match name.to_lowercase().as_str() {
+        "builtin" => Ok(Box::new(BuiltinSource)),
         "hf" | "huggingface" => {
             let endpoint = env_nonempty("HF_ENDPOINT");
             Ok(Box::new(HuggingFaceSource::new(

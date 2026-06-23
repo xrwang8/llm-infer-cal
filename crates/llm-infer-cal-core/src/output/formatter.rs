@@ -8,6 +8,8 @@ use crate::fleet::planner::FleetRecommendation;
 use crate::hardware::loader::GPUDatabase;
 use crate::llm_review::reviewer::LlmReviewResult;
 use crate::output::labels::{AnnotatedValue, Label};
+use serde::Serialize;
+use serde_json::{json, Value};
 
 pub fn format_tag<T>(value: &AnnotatedValue<T>) -> String {
     format!("[{}]", t(&format!("label.{}", value.label.as_str())))
@@ -60,6 +62,40 @@ pub fn render_report_text(report: &EvaluationReport) -> String {
     render_command(report, &mut out);
     render_label_legend(&mut out);
     out.join("\n")
+}
+
+pub fn render_report_json(report: &EvaluationReport) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(&json!({
+        "schema_version": "llm-infer-cal.report/v1",
+        "language": get_locale(),
+        "model": {
+            "id": report.model_id,
+            "source": report.source,
+            "commit_sha": report.commit_sha,
+        },
+        "engine": report.engine,
+        "architecture": architecture_json(report),
+        "weights": weights_json(report),
+        "kv_cache_by_context": report
+            .kv_cache_by_context
+            .iter()
+            .map(|(ctx, value)| {
+                json!({
+                    "context_tokens": ctx,
+                    "bytes": annotated_u64(value),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "engine_compatibility": engine_json(report),
+        "hardware": hardware_json(report),
+        "fleet": fleet_json(report),
+        "performance": performance_json(report),
+        "generated_command": command_json(report),
+        "labels": Label::all()
+            .iter()
+            .map(|label| label.as_str())
+            .collect::<Vec<_>>(),
+    }))
 }
 
 pub fn render_explain_text(entries: &[ExplainEntry]) -> String {
@@ -693,6 +729,295 @@ fn render_label_legend(out: &mut Vec<String>) {
         .collect::<Vec<_>>()
         .join(" ");
     out.push(format!("{} {}", t("section.labels"), labels));
+}
+
+fn architecture_json(report: &EvaluationReport) -> Value {
+    let p = &report.profile;
+    json!({
+        "model_type": annotated_str(&p.model_type, Label::Verified, None),
+        "architectures": p.architectures,
+        "family": annotated_str(p.family.as_str(), Label::Verified, None),
+        "confidence": p.confidence.as_str(),
+        "num_hidden_layers": annotated_u64_raw(p.num_hidden_layers, Label::Verified, None),
+        "hidden_size": annotated_u64_raw(p.hidden_size, Label::Verified, None),
+        "vocab_size": annotated_u64_raw(p.vocab_size, Label::Verified, None),
+        "attention": p.attention.as_ref().map(|attention| {
+            json!({
+                "variant": attention.variant.as_str(),
+                "num_heads": attention.num_heads,
+                "num_kv_heads": attention.num_kv_heads,
+                "head_dim": attention.head_dim,
+                "q_lora_rank": attention.q_lora_rank,
+                "kv_lora_rank": attention.kv_lora_rank,
+                "qk_rope_head_dim": attention.qk_rope_head_dim,
+                "compress_ratios": attention.compress_ratios,
+                "nsa_topk": attention.nsa_topk,
+                "label": Label::Verified.as_str(),
+            })
+        }),
+        "moe": p.moe.as_ref().map(|moe| {
+            json!({
+                "routed_experts": moe.num_routed_experts,
+                "shared_experts": moe.num_shared_experts,
+                "experts_per_token": moe.num_experts_per_tok,
+                "moe_intermediate_size": moe.moe_intermediate_size,
+                "label": Label::Verified.as_str(),
+            })
+        }),
+        "position": p.position.as_ref().map(|position| {
+            json!({
+                "rope_type": position.rope_type,
+                "rope_theta": position.rope_theta,
+                "rope_scaling_factor": position.rope_scaling_factor,
+                "max_position_embeddings": position.max_position_embeddings,
+                "label": Label::Verified.as_str(),
+            })
+        }),
+        "sliding_window": p.sliding_window,
+        "intermediate_size": p.intermediate_size,
+        "tie_word_embeddings": p.tie_word_embeddings,
+        "auxiliary": p.auxiliary,
+    })
+}
+
+fn weights_json(report: &EvaluationReport) -> Value {
+    json!({
+        "safetensors_total_bytes": annotated_u64(&report.weight.total_bytes),
+        "params_estimated": annotated_u64(&report.total_params_estimate),
+        "bits_per_param": report.weight.bits_per_param.as_ref().map(annotated_f64),
+        "quantization_guess": annotated_str(
+            report.weight.quantization_guess.value.as_str(),
+            report.weight.quantization_guess.label,
+            report.weight.quantization_guess.source.as_deref(),
+        ),
+        "reconciliation": {
+            "observed_bytes": report.reconciliation.observed_bytes,
+            "total_params": report.reconciliation.total_params,
+            "best": annotated_str(
+                report.reconciliation.best.value.as_str(),
+                report.reconciliation.best.label,
+                report.reconciliation.best.source.as_deref(),
+            ),
+            "candidates": report
+                .reconciliation
+                .candidates
+                .iter()
+                .map(|candidate| {
+                    json!({
+                        "scheme": candidate.scheme.as_str(),
+                        "predicted_bytes": candidate.predicted_bytes,
+                        "delta_bytes": candidate.delta_bytes.to_string(),
+                        "relative_error": candidate.relative_error,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        },
+    })
+}
+
+fn engine_json(report: &EvaluationReport) -> Value {
+    let Some(entry) = &report.engine_match else {
+        return Value::Null;
+    };
+    json!({
+        "engine": entry.engine,
+        "version_spec": entry.version_spec,
+        "matches_model_type": entry.matches_model_type,
+        "support": entry.support,
+        "verification_level": entry.verification_level,
+        "required_flags": flags_json(&entry.required_flags),
+        "optional_flags": flags_json(&entry.optional_flags),
+        "env": entry.env.iter().map(|env| {
+            json!({
+                "name": env.name,
+                "value": env.value,
+                "note_en": env.note_en,
+                "note_zh": env.note_zh,
+            })
+        }).collect::<Vec<_>>(),
+        "sources": entry.sources.iter().map(|source| {
+            json!({
+                "type": source.source_type,
+                "url": source.url,
+                "captured_date": source.captured_date,
+                "note_en": source.note_en,
+                "note_zh": source.note_zh,
+                "tester": source.tester,
+                "date": source.date,
+                "hardware": source.hardware,
+            })
+        }).collect::<Vec<_>>(),
+        "caveats_en": entry.caveats_en,
+        "caveats_zh": entry.caveats_zh,
+    })
+}
+
+fn hardware_json(report: &EvaluationReport) -> Value {
+    let Some(spec) = &report.gpu_spec else {
+        return json!({
+            "requested": report.gpu,
+            "error": report.gpu_error,
+        });
+    };
+    json!({
+        "id": spec.id,
+        "aliases": spec.aliases,
+        "memory_gb": spec.memory_gb,
+        "nvlink_bandwidth_gbps": spec.nvlink_bandwidth_gbps,
+        "memory_bandwidth_gbps": spec.memory_bandwidth_gbps,
+        "fp16_tflops": spec.fp16_tflops,
+        "fp8_support": spec.fp8_support,
+        "fp4_support": spec.fp4_support,
+        "notes_en": spec.notes_en,
+        "notes_zh": spec.notes_zh,
+        "spec_source": spec.spec_source,
+    })
+}
+
+fn fleet_json(report: &EvaluationReport) -> Value {
+    let Some(fleet) = &report.fleet else {
+        return Value::Null;
+    };
+    json!({
+        "best_tier": fleet.best_tier,
+        "valid_tp_sizes": fleet.valid_tp_sizes,
+        "constraint_note_en": fleet.constraint_note_en,
+        "constraint_note_zh": fleet.constraint_note_zh,
+        "options": fleet.options.iter().map(|option| {
+            json!({
+                "tier": option.tier,
+                "gpu_count": option.gpu_count,
+                "tensor_parallel_size": option.tensor_parallel_size,
+                "pipeline_parallel_size": option.pipeline_parallel_size,
+                "node_count": option.node_count,
+                "weight_bytes_per_gpu": option.weight_bytes_per_gpu,
+                "kv_bytes_per_request": option.kv_bytes_per_request,
+                "max_concurrent_at_reference_ctx": option.max_concurrent_at_reference_ctx,
+                "max_concurrent_by_context": option.max_concurrent_by_context.iter().map(|(ctx, count)| {
+                    json!({
+                        "context_tokens": ctx,
+                        "max_concurrent": count,
+                    })
+                }).collect::<Vec<_>>(),
+                "usable_bytes_per_gpu": option.usable_bytes_per_gpu,
+                "fits": option.fits,
+                "reason_en": option.reason_en,
+                "reason_zh": option.reason_zh,
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn performance_json(report: &EvaluationReport) -> Value {
+    let (Some(prefill), Some(decode), Some(concurrency)) =
+        (&report.prefill, &report.decode, &report.concurrency)
+    else {
+        return Value::Null;
+    };
+    json!({
+        "input_tokens": report.perf_input_tokens,
+        "output_tokens": report.perf_output_tokens,
+        "target_tokens_per_sec": report.perf_target_tokens_per_sec,
+        "prefill": {
+            "total_flops": annotated_u64(&prefill.total_flops),
+            "peak_effective_tflops": annotated_f64(&prefill.peak_effective_tflops),
+            "latency_ms": annotated_f64(&prefill.latency_ms),
+            "utilization": prefill.utilization,
+        },
+        "decode": {
+            "active_weight_bytes_per_gpu": annotated_u64(&decode.active_weight_bytes_per_gpu),
+            "per_gpu_tokens_per_sec": annotated_f64(&decode.per_gpu_tokens_per_sec),
+            "cluster_tokens_per_sec": annotated_f64(&decode.cluster_tokens_per_sec),
+            "bw_utilization": decode.bw_utilization,
+            "cluster_comm_efficiency": decode.cluster_comm_efficiency,
+            "moe_active_weight_bytes_per_gpu": decode.moe_active_weight_bytes_per_gpu.as_ref().map(annotated_u64),
+            "moe_active_tokens_per_sec": decode.moe_active_tokens_per_sec.as_ref().map(annotated_f64),
+        },
+        "concurrency": {
+            "k_bound": annotated_u64(&concurrency.k_bound),
+            "k_source_headroom_bytes": concurrency.k_source_headroom_bytes,
+            "k_source_kv_per_req_bytes": concurrency.k_source_kv_per_req_bytes,
+            "l_bound": annotated_u64(&concurrency.l_bound),
+            "target_tokens_per_sec": concurrency.target_tokens_per_sec,
+            "degradation_factor": concurrency.degradation_factor,
+            "max_concurrent": annotated_u64(&concurrency.max_concurrent),
+            "bottleneck": concurrency.bottleneck.as_str(),
+            "bottleneck_reason_en": concurrency.bottleneck_reason_en,
+            "bottleneck_reason_zh": concurrency.bottleneck_reason_zh,
+        },
+        "max_concurrent": annotated_u64(&concurrency.max_concurrent),
+        "bottleneck": concurrency.bottleneck.as_str(),
+    })
+}
+
+fn command_json(report: &EvaluationReport) -> Value {
+    let (Some(command), Some(fleet)) = (&report.generated_command, &report.fleet) else {
+        return Value::Null;
+    };
+    let Some(best) = fleet.best_option() else {
+        return Value::Null;
+    };
+    json!({
+        "engine": report.engine,
+        "tier": best.tier,
+        "gpu_count": best.gpu_count,
+        "tensor_parallel_size": best.tensor_parallel_size,
+        "pipeline_parallel_size": best.pipeline_parallel_size,
+        "node_count": best.node_count,
+        "lines": command_lines(command),
+        "command": command,
+    })
+}
+
+fn command_lines(command: &str) -> Vec<String> {
+    command
+        .lines()
+        .map(|line| line.trim())
+        .map(|line| line.strip_suffix('\\').unwrap_or(line).trim())
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn flags_json(flags: &[EngineFlag]) -> Vec<Value> {
+    flags
+        .iter()
+        .map(|flag| {
+            json!({
+                "flag": flag.flag,
+                "value": flag.value,
+                "note_en": flag.note_en,
+                "note_zh": flag.note_zh,
+            })
+        })
+        .collect()
+}
+
+fn annotated_u64(value: &AnnotatedValue<u64>) -> Value {
+    annotated_value(value.value, value.label, value.source.as_deref())
+}
+
+fn annotated_f64(value: &AnnotatedValue<f64>) -> Value {
+    annotated_value(value.value, value.label, value.source.as_deref())
+}
+
+fn annotated_u64_raw(value: u64, label: Label, source: Option<&str>) -> Value {
+    annotated_value(value, label, source)
+}
+
+fn annotated_str(value: &str, label: Label, source: Option<&str>) -> Value {
+    annotated_value(value, label, source)
+}
+
+fn annotated_value<T>(value: T, label: Label, source: Option<&str>) -> Value
+where
+    T: Serialize,
+{
+    json!({
+        "value": value,
+        "label": label.as_str(),
+        "source": source,
+    })
 }
 
 fn row(field: &str, value: impl ToString, label: impl ToString) -> String {

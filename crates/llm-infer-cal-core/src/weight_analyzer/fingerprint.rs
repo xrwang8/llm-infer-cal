@@ -18,7 +18,9 @@ pub struct QuantFingerprint {
 }
 
 pub fn from_config(config: &Value) -> Option<QuantFingerprint> {
-    let qc = config.get("quantization_config")?.as_object()?;
+    let Some(qc) = config.get("quantization_config").and_then(Value::as_object) else {
+        return dtype_fingerprint(config);
+    };
     let quant_method = qc.get("quant_method").and_then(Value::as_str);
     let bits = qc.get("bits").and_then(Value::as_i64);
     let weight_dtype = qc.get("weight_dtype").and_then(Value::as_str);
@@ -133,7 +135,51 @@ pub fn from_config(config: &Value) -> Option<QuantFingerprint> {
         });
     }
 
+    dtype_fingerprint(config)
+}
+
+fn dtype_fingerprint(config: &Value) -> Option<QuantFingerprint> {
+    let candidates = [
+        ("torch_dtype", config.get("torch_dtype")),
+        ("dtype", config.get("dtype")),
+        (
+            "text_config.torch_dtype",
+            config
+                .get("text_config")
+                .and_then(|text_config| text_config.get("torch_dtype")),
+        ),
+        (
+            "text_config.dtype",
+            config
+                .get("text_config")
+                .and_then(|text_config| text_config.get("dtype")),
+        ),
+    ];
+
+    for (path, value) in candidates {
+        let Some(dtype) = value.and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(scheme) = scheme_from_dtype(dtype) else {
+            continue;
+        };
+        return Some(QuantFingerprint {
+            scheme,
+            source_type: SourceType::ConfigJson,
+            evidence: format!("config.json {path}={dtype}"),
+        });
+    }
+
     None
+}
+
+fn scheme_from_dtype(dtype: &str) -> Option<QuantizationScheme> {
+    match dtype.to_lowercase().as_str() {
+        "bfloat16" | "bf16" => Some(QuantizationScheme::Bf16),
+        "float16" | "fp16" | "f16" => Some(QuantizationScheme::Fp16),
+        "float8" | "fp8" | "float8_e4m3fn" | "float8_e5m2" => Some(QuantizationScheme::Fp8),
+        _ => None,
+    }
 }
 
 pub fn from_safetensors_dtypes(

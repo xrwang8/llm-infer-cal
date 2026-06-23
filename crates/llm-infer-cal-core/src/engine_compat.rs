@@ -14,6 +14,16 @@ pub struct EngineFlag {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct EngineEnvVar {
+    pub name: String,
+    pub value: String,
+    #[serde(default)]
+    pub note_en: Option<String>,
+    #[serde(default)]
+    pub note_zh: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct EngineSource {
     #[serde(rename = "type")]
     pub source_type: String,
@@ -49,6 +59,8 @@ pub struct EngineCompatEntry {
     pub required_flags: Vec<EngineFlag>,
     #[serde(default)]
     pub optional_flags: Vec<EngineFlag>,
+    #[serde(default)]
+    pub env: Vec<EngineEnvVar>,
     #[serde(default)]
     pub sources: Vec<EngineSource>,
     #[serde(default)]

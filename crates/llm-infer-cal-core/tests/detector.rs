@@ -76,6 +76,44 @@ fn future_complete_config_is_medium_confidence_transformer() {
 }
 
 #[test]
+fn multimodal_text_config_is_used_for_qwen36_moe_shape() {
+    let profile = detect(&json!({
+        "architectures": ["Qwen3_5MoeForConditionalGeneration"],
+        "model_type": "qwen3_5_moe",
+        "text_config": {
+            "model_type": "qwen3_5_moe_text",
+            "hidden_size": 2048,
+            "num_hidden_layers": 40,
+            "num_attention_heads": 16,
+            "num_key_value_heads": 2,
+            "head_dim": 256,
+            "num_experts": 256,
+            "num_experts_per_tok": 8,
+            "moe_intermediate_size": 512,
+            "max_position_embeddings": 262144,
+            "vocab_size": 248320
+        },
+        "vision_config": {
+            "hidden_size": 1152
+        }
+    }));
+
+    assert_eq!(profile.family, Family::Transformer);
+    assert_eq!(profile.model_type, "qwen3_5_moe_text");
+    assert_eq!(profile.num_hidden_layers, 40);
+    assert_eq!(profile.hidden_size, 2048);
+    assert_eq!(profile.vocab_size, 248320);
+    assert_eq!(
+        profile.position.unwrap().max_position_embeddings,
+        Some(262144)
+    );
+    assert_eq!(profile.attention.unwrap().variant, AttentionVariant::Gqa);
+    let moe = profile.moe.unwrap();
+    assert_eq!(moe.num_routed_experts, 256);
+    assert_eq!(moe.num_experts_per_tok, 8);
+}
+
+#[test]
 fn csa_hca_length_rules_match_rust_contract() {
     let mismatch = detect(&json!({
         "model_type": "hypothetical",

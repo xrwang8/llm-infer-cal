@@ -22,6 +22,8 @@ const USAGE_OPTIONS: &[&str] = &[
     "--explain",
     "--llm-review",
     "--source",
+    "--format",
+    "--json",
     "--install-completion",
     "--show-completion",
     "--help",
@@ -89,7 +91,7 @@ fn unknown_source_returns_localized_error() {
     assert!(exit.stdout.is_empty());
     assert!(exit
         .stderr
-        .contains("未知 --source 'mirror'。请使用 'huggingface' 或 'modelscope'。"));
+        .contains("未知 --source 'mirror'。请使用 'builtin'、'huggingface' 或 'modelscope'。"));
     assert!(!exit.stderr.contains("Unknown --source"));
 }
 
@@ -145,6 +147,195 @@ fn all_runtime_flags_parse_before_source_validation() {
     assert_eq!(exit.code, 1);
     assert!(exit.stdout.is_empty());
     assert!(exit.stderr.contains("未知 --source 'mirror'"));
+}
+
+#[test]
+fn builtin_qwen36_model_renders_zh_report_without_network() {
+    let exit = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "Qwen/Qwen3.6-35B-A3B",
+        "--gpu",
+        "H100",
+        "--source",
+        "builtin",
+    ]);
+
+    assert_eq!(exit.code, 0, "stderr: {}", exit.stderr);
+    assert!(exit.stderr.is_empty());
+    assert!(exit.stdout.contains("Qwen/Qwen3.6-35B-A3B  来源 builtin"));
+    assert!(exit.stdout.contains("模型类型: qwen3_5_moe_text"));
+    assert!(exit.stdout.contains("MoE: 256 个 routed"));
+    assert!(exit.stdout.contains("最大上下文长度: 262,144"));
+    assert!(exit.stdout.contains("safetensors 总字节: 71.90 GB"));
+    assert!(exit.stdout.contains("量化方案推断: BF16 [已验证]"));
+    assert!(exit.stdout.contains("生成的启动命令"));
+    assert!(exit.stdout.contains("--trust-remote-code"));
+    assert!(exit.stdout.contains("--enable-auto-tool-choice"));
+    assert!(exit.stdout.contains("--tool-call-parser qwen3_xml"));
+    assert!(exit.stdout.contains("--reasoning-parser qwen3"));
+    assert!(exit.stdout.contains("--mm-encoder-tp-mode data"));
+    assert!(!exit.stdout.contains("Source unavailable"));
+    assert!(!exit.stderr.contains("数据源不可用"));
+}
+
+#[test]
+fn builtin_qwen36_sglang_command_includes_recipe_flags() {
+    let exit = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "Qwen/Qwen3.6-35B-A3B",
+        "--gpu",
+        "H100",
+        "--engine",
+        "sglang",
+        "--source",
+        "builtin",
+    ]);
+
+    assert_eq!(exit.code, 0, "stderr: {}", exit.stderr);
+    assert!(exit.stderr.is_empty());
+    assert!(exit
+        .stdout
+        .contains("SGLANG_ENABLE_SPEC_V2=1 python -m sglang.launch_server"));
+    assert!(exit.stdout.contains("--reasoning-parser qwen3"));
+    assert!(exit.stdout.contains("--tool-call-parser qwen3_coder"));
+    assert!(exit.stdout.contains("--speculative-algorithm EAGLE"));
+    assert!(exit.stdout.contains("--speculative-num-steps 3"));
+    assert!(exit.stdout.contains("--speculative-eagle-topk 1"));
+    assert!(exit.stdout.contains("--speculative-num-draft-tokens 4"));
+    assert!(exit
+        .stdout
+        .contains("--mamba-scheduler-strategy extra_buffer"));
+    assert!(exit.stdout.contains("--mem-fraction-static 0.8"));
+    assert!(!exit.stdout.contains("--mem-fraction-static 0.9"));
+}
+
+#[test]
+fn builtin_qwen36_can_render_machine_readable_json() {
+    let exit = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "Qwen/Qwen3.6-35B-A3B",
+        "--gpu",
+        "H100",
+        "--source",
+        "builtin",
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(exit.code, 0, "stderr: {}", exit.stderr);
+    assert!(exit.stderr.is_empty());
+    assert!(exit.stdout.trim_start().starts_with('{'));
+
+    let json: serde_json::Value =
+        serde_json::from_str(&exit.stdout).expect("stdout should be valid JSON");
+    assert_eq!(json["schema_version"], "llm-infer-cal.report/v1");
+    assert_eq!(json["language"], "zh");
+    assert_eq!(json["model"]["id"], "Qwen/Qwen3.6-35B-A3B");
+    assert_eq!(json["model"]["source"], "builtin");
+    assert_eq!(
+        json["architecture"]["model_type"]["value"],
+        "qwen3_5_moe_text"
+    );
+    assert_eq!(json["architecture"]["moe"]["routed_experts"], 256);
+    assert_eq!(
+        json["weights"]["safetensors_total_bytes"]["value"],
+        71_903_776_776_u64
+    );
+    assert_eq!(json["weights"]["quantization_guess"]["value"], "BF16");
+    assert_eq!(json["hardware"]["id"], "H100");
+    assert_eq!(json["fleet"]["best_tier"], "dev");
+    assert_eq!(json["performance"]["max_concurrent"]["value"], 10);
+    assert!(json["generated_command"]["command"]
+        .as_str()
+        .unwrap()
+        .contains("--reasoning-parser qwen3"));
+    assert_eq!(
+        json["generated_command"]["lines"][0],
+        "vllm serve Qwen/Qwen3.6-35B-A3B"
+    );
+    assert!(json["generated_command"]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|line| line == "--tool-call-parser qwen3_xml"));
+}
+
+#[test]
+fn builtin_glm52_model_renders_zh_report_and_json_without_network() {
+    let text = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "ZhipuAI/GLM-5.2",
+        "--gpu",
+        "H100",
+        "--source",
+        "builtin",
+    ]);
+
+    assert_eq!(text.code, 0, "stderr: {}", text.stderr);
+    assert!(text.stderr.is_empty());
+    assert!(text.stdout.contains("ZhipuAI/GLM-5.2  来源 builtin"));
+    assert!(text.stdout.contains("模型类型: glm_moe_dsa"));
+    assert!(text.stdout.contains("safetensors 总字节: 1506.67 GB"));
+    assert!(text.stdout.contains("最小: 24 GPUs"));
+    assert!(text.stdout.contains("开发 *: 48 GPUs"));
+    assert!(!text.stdout.contains("数据源不可用"));
+
+    let json_exit = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "ZhipuAI/GLM-5.2",
+        "--gpu",
+        "H100",
+        "--source",
+        "builtin",
+        "--json",
+    ]);
+
+    assert_eq!(json_exit.code, 0, "stderr: {}", json_exit.stderr);
+    assert!(json_exit.stderr.is_empty());
+    let json: serde_json::Value =
+        serde_json::from_str(&json_exit.stdout).expect("stdout should be valid JSON");
+    assert_eq!(json["model"]["id"], "ZhipuAI/GLM-5.2");
+    assert_eq!(json["model"]["source"], "builtin");
+    assert_eq!(json["architecture"]["model_type"]["value"], "glm_moe_dsa");
+    assert_eq!(
+        json["weights"]["safetensors_total_bytes"]["value"],
+        1_506_667_387_408_u64
+    );
+    assert_eq!(json["fleet"]["best_tier"], "dev");
+    assert_eq!(json["generated_command"]["gpu_count"], 48);
+    assert_eq!(json["generated_command"]["tensor_parallel_size"], 8);
+    assert_eq!(json["generated_command"]["pipeline_parallel_size"], 6);
+}
+
+#[test]
+fn json_alias_matches_format_json() {
+    let exit = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "Qwen/Qwen3.6-35B-A3B",
+        "--gpu",
+        "H100",
+        "--source",
+        "builtin",
+        "--json",
+    ]);
+
+    assert_eq!(exit.code, 0, "stderr: {}", exit.stderr);
+    assert!(exit.stderr.is_empty());
+    let json: serde_json::Value =
+        serde_json::from_str(&exit.stdout).expect("stdout should be valid JSON");
+    assert_eq!(json["schema_version"], "llm-infer-cal.report/v1");
 }
 
 #[test]

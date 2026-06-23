@@ -528,6 +528,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "llm-infer-cal-core",
+ "serde_json",
 ]
 
 [[package]]

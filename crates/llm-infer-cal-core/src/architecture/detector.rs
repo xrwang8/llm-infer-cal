@@ -16,6 +16,8 @@ const KNOWN_MODEL_TYPES: &[&str] = &[
     "qwen2_moe",
     "qwen3",
     "qwen3_moe",
+    "qwen3_5_moe",
+    "qwen3_5_moe_text",
     "deepseek_v2",
     "deepseek_v3",
     "deepseek_v3_2",
@@ -30,6 +32,7 @@ const KNOWN_MODEL_TYPES: &[&str] = &[
 const STATE_SPACE_TYPES: &[&str] = &["mamba", "mamba2", "falcon_mamba", "jamba"];
 
 pub fn detect(config: &Value) -> ArchitectureProfile {
+    let config = effective_model_config(config);
     let model_type = model_type(config);
     let architectures = architectures(config);
 
@@ -102,6 +105,21 @@ pub fn detect(config: &Value) -> ArchitectureProfile {
         tie_word_embeddings: tie_word_embeddings.unwrap_or(false),
         auxiliary,
     }
+}
+
+fn effective_model_config(config: &Value) -> &Value {
+    if get_truthy_u64(config, "num_hidden_layers").is_some()
+        && get_truthy_u64(config, "hidden_size").is_some()
+    {
+        return config;
+    }
+    config
+        .get("text_config")
+        .filter(|text_config| {
+            get_truthy_u64(text_config, "num_hidden_layers").is_some()
+                && get_truthy_u64(text_config, "hidden_size").is_some()
+        })
+        .unwrap_or(config)
 }
 
 pub fn fallback_unknown(config: &Value) -> ArchitectureProfile {

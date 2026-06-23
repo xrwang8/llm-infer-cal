@@ -86,14 +86,21 @@ fn config_fingerprint_maps_common_quantization_configs() {
         "quantization_config": {"quant_method": "bitsandbytes", "load_in_4bit": true}
     }))
     .unwrap();
-    let missing = from_config(&json!({"torch_dtype": "bfloat16"}));
+    let root_bf16 = from_config(&json!({"torch_dtype": "bfloat16"})).unwrap();
+    let nested_bf16 = from_config(&json!({
+        "model_type": "qwen3_5_moe",
+        "text_config": {"dtype": "bfloat16"}
+    }))
+    .unwrap();
 
     assert_eq!(gptq.scheme, QuantizationScheme::GptqInt4);
     assert_eq!(gptq.source_type, SourceType::ConfigJson);
     assert!(gptq.evidence.contains("gptq"));
     assert_eq!(compressed_fp8.scheme, QuantizationScheme::Fp8);
     assert_eq!(bnb.scheme, QuantizationScheme::Int4);
-    assert!(missing.is_none());
+    assert_eq!(root_bf16.scheme, QuantizationScheme::Bf16);
+    assert_eq!(nested_bf16.scheme, QuantizationScheme::Bf16);
+    assert!(nested_bf16.evidence.contains("text_config.dtype=bfloat16"));
 }
 
 #[test]

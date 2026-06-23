@@ -1,0 +1,2091 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-06-23T13:16:56Z",
+  "sources": [
+    {
+      "kind": "vllm_models_json",
+      "url": "https://recipes.vllm.ai/models.json"
+    },
+    {
+      "kind": "sglang_llms_index",
+      "url": "https://docs.sglang.io/llms.txt"
+    }
+  ],
+  "models": [
+    {
+      "id": "deepseek-ai/DeepSeek-Math-V2",
+      "aliases": [
+
+      ],
+      "provider": "deepseek-ai",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-Math-V2.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-OCR",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-OCR.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-OCR.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-OCR-2",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-OCR-2.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-OCR-2.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-R1",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-R1.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-R1.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-R1-0528",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-R1-0528.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-R1.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-V3.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3-0324",
+      "aliases": [
+
+      ],
+      "provider": "deepseek-ai",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.1",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-V3.1.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3_1.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.1-Terminus",
+      "aliases": [
+
+      ],
+      "provider": "deepseek-ai",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3_1.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.2",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-V3.2.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3_2.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.2-Exp",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-V3.2-Exp.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3_2.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.2-Speciale",
+      "aliases": [
+
+      ],
+      "provider": "deepseek-ai",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3_2.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Flash",
+      "aliases": [
+        "deepseek-ai/deepseek-v4"
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4-Flash.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V4.md",
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.2.md"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Pro",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4-Pro.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V4.md"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-K2-Instruct",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/moonshotai/Kimi-K2-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.md"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-K2-Thinking",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/moonshotai/Kimi-K2-Thinking.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.md"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-K2.5",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/moonshotai/Kimi-K2.5.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.5.md"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-K2.6",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/moonshotai/Kimi-K2.6.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.6.md"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-K2.7-Code",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/moonshotai/Kimi-K2.7-Code.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.7-Code.md"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-Linear-48B-A3B-Instruct",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/moonshotai/Kimi-Linear-48B-A3B-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-Linear.md"
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-R1-0528-FP4-v2",
+      "aliases": [
+
+      ],
+      "provider": "nvidia",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-R1.md"
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-R1-0528-NVFP4-v2",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/DeepSeek-R1-0528-NVFP4-v2.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-V3-0324-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "nvidia",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3.md"
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-V3-FP4",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/DeepSeek-V3-FP4.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-V3.1-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/DeepSeek-V3.1-NVFP4.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-V3.2-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/DeepSeek-V3.2-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V3_2.md"
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-V4-Flash-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/DeepSeek-V4-Flash-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V4.md"
+      ]
+    },
+    {
+      "id": "nvidia/DeepSeek-V4-Pro-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "DeepSeek",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/DeepSeek-V4-Pro-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/DeepSeek/DeepSeek-V4.md"
+      ]
+    },
+    {
+      "id": "nvidia/GLM-4.7-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/GLM-4.7-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.7.md"
+      ]
+    },
+    {
+      "id": "nvidia/GLM-5-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/GLM-5-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.md"
+      ]
+    },
+    {
+      "id": "nvidia/GLM-5.1-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/GLM-5.1-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.1.md"
+      ]
+    },
+    {
+      "id": "nvidia/Kimi-K2-Thinking-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Kimi-K2-Thinking-NVFP4.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "nvidia/Kimi-K2.5-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Kimi-K2.5-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.5.md"
+      ]
+    },
+    {
+      "id": "nvidia/Kimi-K2.6-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Moonshot AI",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Kimi-K2.6-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K2.6.md"
+      ]
+    },
+    {
+      "id": "nvidia/Qwen3-235B-A22B-Instruct-2507-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Qwen3-235B-A22B-Instruct-2507-NVFP4.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "nvidia/Qwen3-Coder-480B-A35B-Instruct-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Qwen3-Coder-480B-A35B-Instruct-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Coder.md"
+      ]
+    },
+    {
+      "id": "nvidia/Qwen3-Next-80B-A3B-Instruct-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Qwen3-Next-80B-A3B-Instruct-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Next.md"
+      ]
+    },
+    {
+      "id": "nvidia/Qwen3-VL-235B-A22B-Instruct-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Qwen3-VL-235B-A22B-Instruct-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-VL.md"
+      ]
+    },
+    {
+      "id": "nvidia/Qwen3.5-397B-A17B-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Qwen3.5-397B-A17B-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "nvidia/Qwen3.6-35B-A3B-NVFP4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/nvidia/Qwen3.6-35B-A3B-NVFP4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.6.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen-Image",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen-Image.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen2.5-32B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen2.5-32B.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen2.5-VL-72B-Instruct",
+      "aliases": [
+        "Qwen/qwen25-vl"
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen2.5-VL-72B-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen2.5-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen2.5-VL-72B-Instruct-AWQ.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen2.5-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen2.5-VL-7B-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen2.5-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen2.5-VL-7B-Instruct-AWQ.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen2.5-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-0.6B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-0.6B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-1.7B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-1.7B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-14B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-14B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-235B-A22B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-235B-A22B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-235B-A22B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-235B-A22B-Instruct-2507.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-235B-A22B-Thinking-2507-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-30B-A3B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-30B-A3B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-30B-A3B-Thinking-2507-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-32B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-32B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-32B-AWQ",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-32B-AWQ.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-32B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-32B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-4B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-4B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-4B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-4B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-4B-Instruct-2507",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-4B-Instruct-2507-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-4B-Thinking-2507",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-4B-Thinking-2507-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-8B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-8B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-ASR-1.7B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-ASR-1.7B.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Coder.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+      "aliases": [
+        "Qwen/qwen3-coder"
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-Coder-480B-A35B-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Coder.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Coder.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Coder-Next",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Coder-Next.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+      "aliases": [
+        "Qwen/qwen3-next"
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-Next-80B-A3B-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Next.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-Next-80B-A3B-Instruct-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Next.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-Next.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-VL-235B-A22B-Instruct.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3-VL-235B-A22B-Instruct-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-VL-235B-A22B-Thinking",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3-VL.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-0.8B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-0.8B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-122B-A10B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-122B-A10B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-122B-A10B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-122B-A10B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-122B-A10B-GPTQ-Int4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-122B-A10B-GPTQ-Int4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-27B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-27B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-27B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-27B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-27B-GPTQ-Int4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-27B-GPTQ-Int4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-2B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-2B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-35B-A3B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-35B-A3B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-35B-A3B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-35B-A3B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-35B-A3B-GPTQ-Int4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-397B-A17B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-397B-A17B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-397B-A17B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-397B-A17B-GPTQ-Int4.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-4B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-4B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-9B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.5-9B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.5.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.6-27B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.6-27B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.6.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.6-27B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.6-27B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.6.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.6-35B-A3B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.6.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.6.md"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3Guard-Gen-0.6B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3Guard-Gen-0.6B.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3Guard-Gen-4B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3Guard-Gen-4B.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3Guard-Gen-8B",
+      "aliases": [
+
+      ],
+      "provider": "Qwen",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/Qwen/Qwen3Guard-Gen-8B.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.5",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.5.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.5.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.5-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.5-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.5.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.5V",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.5V.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.5V.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.5V-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.5V-FP8.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.6",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.6.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.6.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.6-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.6-FP8.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.6V",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.6V.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.6V.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.6V-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.6V-FP8.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.7",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.7.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.7.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.7-Flash",
+      "aliases": [
+
+      ],
+      "provider": "zai-org",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.7-Flash.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-4.7-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-4.7-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-4.7.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-5.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-5-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5.1",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-5.1.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.1.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5.1-FP8",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-5.1-FP8.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.1.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5.2-FP8",
+      "aliases": [
+
+      ],
+      "provider": "zai-org",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "sglang"
+      ],
+      "vllm_recipe_json": null,
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.2.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-ASR-Nano-2512",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-ASR-Nano-2512.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-GA",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-GA.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-Image",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-Image.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/GLM-OCR",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-OCR.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-OCR.md"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-TTS",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-TTS.json",
+      "sglang_pages": [
+
+      ]
+    },
+    {
+      "id": "zai-org/Glyph",
+      "aliases": [
+
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "huggingface",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/Glyph.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-Glyph.md"
+      ]
+    },
+    {
+      "id": "ZhipuAI/GLM-5.2",
+      "aliases": [
+        "zai-org/GLM-5.2",
+        "zai-org/glm-5.2"
+      ],
+      "provider": "GLM (Z-AI)",
+      "preferred_source": "modelscope",
+      "mentioned_by": [
+        "vllm",
+        "sglang"
+      ],
+      "vllm_recipe_json": "https://recipes.vllm.ai/zai-org/GLM-5.2.json",
+      "sglang_pages": [
+        "https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.2.md"
+      ]
+    }
+  ]
+}

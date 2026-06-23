@@ -49,10 +49,19 @@ fn vllm_trust_remote_code_heuristic_matches_rust_contract() {
         None,
         None,
     );
+    let qwen36 = generate_vllm_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(1),
+        None,
+        None,
+    );
 
     assert!(!llama.contains("--trust-remote-code"));
     assert!(deepseek.contains("--trust-remote-code"));
     assert!(deepseek.contains("--max-model-len 1048576"));
+    assert!(qwen36.contains("--trust-remote-code"));
+    assert!(qwen36.contains("--max-model-len 262144"));
 }
 
 #[test]

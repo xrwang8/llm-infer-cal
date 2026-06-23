@@ -123,6 +123,38 @@ entries:
     caveats_zh: []
 
   - engine: vllm
+    version_spec: ">=0.17.0"
+    matches_model_type: qwen3_5_moe_text
+    support: full
+    verification_level: cited
+    required_flags:
+      - flag: "--enable-auto-tool-choice"
+        value: null
+        note_en: "Official Qwen3.6 vLLM recipe enables automatic tool choice."
+        note_zh: "Qwen3.6 官方 vLLM 食谱启用自动工具选择。"
+      - flag: "--tool-call-parser"
+        value: "qwen3_xml"
+        note_en: "Tool-call parser from the official Qwen3.6 vLLM recipe."
+        note_zh: "Qwen3.6 官方 vLLM 食谱使用的工具调用解析器。"
+      - flag: "--reasoning-parser"
+        value: "qwen3"
+        note_en: "Reasoning parser from the official Qwen3.6 vLLM recipe."
+        note_zh: "Qwen3.6 官方 vLLM 食谱使用的推理解析器。"
+      - flag: "--mm-encoder-tp-mode"
+        value: "data"
+        note_en: "Multimodal encoder TP mode from the official Qwen3.6 vLLM recipe."
+        note_zh: "Qwen3.6 官方 vLLM 食谱使用的多模态编码器 TP 模式。"
+    optional_flags: []
+    sources:
+      - type: release_notes
+        url: "https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B.json"
+        captured_date: "2026-06-23"
+    caveats_en:
+      - "The official recipe uses TP=1 for its selected hardware profile; llm-infer-cal still sizes TP from the requested GPU and memory target."
+    caveats_zh:
+      - "官方食谱在其硬件档位中使用 TP=1；llm-infer-cal 仍会按用户指定 GPU 和显存目标重新计算 TP。"
+
+  - engine: vllm
     version_spec: ">=0.6.0"
     matches_model_type: mixtral
     support: full
@@ -408,6 +440,53 @@ entries:
         captured_date: "2026-04-24"
     caveats_en: []
     caveats_zh: []
+
+  - engine: sglang
+    version_spec: ">=0.5.10"
+    matches_model_type: qwen3_5_moe_text
+    support: full
+    verification_level: cited
+    required_flags:
+      - flag: "--reasoning-parser"
+        value: "qwen3"
+        note_en: "Default reasoning parser in the SGLang Qwen3.6 cookbook."
+        note_zh: "SGLang Qwen3.6 cookbook 默认推理解析器。"
+      - flag: "--tool-call-parser"
+        value: "qwen3_coder"
+        note_en: "Default tool-call parser in the SGLang Qwen3.6 cookbook."
+        note_zh: "SGLang Qwen3.6 cookbook 默认工具调用解析器。"
+      - flag: "--speculative-algorithm"
+        value: "EAGLE"
+        note_en: "Default speculative decoding algorithm in the SGLang Qwen3.6 cookbook."
+        note_zh: "SGLang Qwen3.6 cookbook 默认 speculative decoding 算法。"
+      - flag: "--speculative-num-steps"
+        value: "3"
+      - flag: "--speculative-eagle-topk"
+        value: "1"
+      - flag: "--speculative-num-draft-tokens"
+        value: "4"
+      - flag: "--mamba-scheduler-strategy"
+        value: "extra_buffer"
+        note_en: "Cookbook default when speculative decoding is enabled."
+        note_zh: "启用 speculative decoding 时 cookbook 的默认调度策略。"
+      - flag: "--mem-fraction-static"
+        value: "0.8"
+        note_en: "H100/H200/B-series memory fraction from the SGLang Qwen3.6 cookbook."
+        note_zh: "SGLang Qwen3.6 cookbook 给 H100/H200/B 系列的显存比例。"
+    optional_flags: []
+    env:
+      - name: "SGLANG_ENABLE_SPEC_V2"
+        value: "1"
+        note_en: "Required by the cookbook command when speculative decoding is enabled."
+        note_zh: "cookbook 在启用 speculative decoding 时要求设置。"
+    sources:
+      - type: release_notes
+        url: "https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.6"
+        captured_date: "2026-06-23"
+    caveats_en:
+      - "The cookbook defaults to FP8 and TP=1 on H100; llm-infer-cal keeps the requested BF16 model id and sizes TP from memory."
+    caveats_zh:
+      - "cookbook 在 H100 上默认选择 FP8 和 TP=1；llm-infer-cal 保留用户选择的 BF16 模型 ID，并按显存重新计算 TP。"
 
   - engine: sglang
     version_spec: ">=0.4.0"

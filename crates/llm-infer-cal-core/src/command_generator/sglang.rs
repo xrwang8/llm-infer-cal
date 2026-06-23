@@ -9,8 +9,20 @@ pub fn generate_sglang_command(
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
 ) -> String {
+    let launch = match entry {
+        Some(entry) if !entry.env.is_empty() => {
+            let prefix = entry
+                .env
+                .iter()
+                .map(|env| format!("{}={}", env.name, env.value))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{prefix} python -m sglang.launch_server")
+        }
+        _ => "python -m sglang.launch_server".to_string(),
+    };
     let mut lines = vec![
-        "python -m sglang.launch_server".to_string(),
+        launch,
         format!("  --model-path {model_id}"),
         format!("  --tp {}", parallelism.total_gpus),
     ];
@@ -34,7 +46,9 @@ pub fn generate_sglang_command(
         lines.push("  --trust-remote-code".to_string());
     }
 
-    lines.push("  --mem-fraction-static 0.9".to_string());
+    if !entry_has_flag(entry, "--mem-fraction-static") {
+        lines.push("  --mem-fraction-static 0.9".to_string());
+    }
 
     if let Some(entry) = entry {
         for flag in &entry.required_flags {
@@ -46,4 +60,14 @@ pub fn generate_sglang_command(
     }
 
     lines.join(" \\\n")
+}
+
+fn entry_has_flag(entry: Option<&EngineCompatEntry>, flag: &str) -> bool {
+    entry.is_some_and(|entry| {
+        entry
+            .required_flags
+            .iter()
+            .chain(entry.optional_flags.iter())
+            .any(|engine_flag| engine_flag.flag == flag)
+    })
 }

@@ -208,8 +208,8 @@ fn message(key: &str) -> Option<(&'static str, &'static str)> {
             "缺少选项 --gpu。使用 --list-gpus 查看可选 GPU。",
         )),
         "cli.err.unknown_source" => Some((
-            "Unknown --source '{source}'. Use 'huggingface' or 'modelscope'.",
-            "未知 --source '{source}'。请使用 'huggingface' 或 'modelscope'。",
+            "Unknown --source '{source}'. Use 'builtin', 'huggingface', or 'modelscope'.",
+            "未知 --source '{source}'。请使用 'builtin'、'huggingface' 或 'modelscope'。",
         )),
         "source.pr" => Some(("PR", "PR")),
         "source.release_notes" => Some(("release notes", "release note")),

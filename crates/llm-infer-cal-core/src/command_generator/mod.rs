@@ -36,5 +36,6 @@ fn needs_trust_remote_code(model_type: &str) -> bool {
         || model_type.starts_with("glm")
         || model_type.starts_with("qwen2_moe")
         || model_type.starts_with("qwen3_moe")
+        || model_type.starts_with("qwen3_5_moe")
         || model_type.starts_with("mixtral")
 }

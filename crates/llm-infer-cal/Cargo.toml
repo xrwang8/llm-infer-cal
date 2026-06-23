@@ -9,6 +9,9 @@ rust-version.workspace = true
 clap = { version = "4", features = ["derive"] }
 llm-infer-cal-core = { path = "../llm-infer-cal-core" }
 
+[dev-dependencies]
+serde_json = "1"
+
 [[bin]]
 name = "llm-infer-cal"
 path = "src/main.rs"
