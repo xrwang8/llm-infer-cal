@@ -99,8 +99,6 @@ export type EvaluateForm = {
   prefill_utilization: string;
   decode_bw_utilization: string;
   concurrency_degradation: string;
-  refresh: boolean;
-  explain: boolean;
   llm_review: boolean;
   llm_review_api_key: string;
   llm_review_base_url: string;
@@ -121,7 +119,7 @@ type PerformanceSettingKey =
   | 'concurrency_degradation';
 
 type AdvancedNumberSettingKey = 'gpu_count';
-type AdvancedBooleanSettingKey = 'refresh' | 'explain' | 'llm_review';
+type AdvancedBooleanSettingKey = 'llm_review';
 type LlmReviewSettingKey = 'llm_review_api_key' | 'llm_review_base_url' | 'llm_review_model';
 
 export type PerformanceSetting = {
@@ -182,8 +180,6 @@ const PERFORMANCE_SETTINGS: PerformanceSetting[] = [
 
 const ADVANCED_SETTINGS: AdvancedSetting[] = [
   { key: 'gpu_count', label: '强制 GPU 数', control: 'number', collapsedByDefault: true },
-  { key: 'refresh', label: '刷新缓存', control: 'checkbox', collapsedByDefault: true },
-  { key: 'explain', label: '输出推导链（--explain）', control: 'checkbox', collapsedByDefault: true },
   { key: 'llm_review', label: 'LLM 审计（--llm-review）', control: 'checkbox', collapsedByDefault: true },
 ];
 
@@ -401,8 +397,7 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     prefill_utilization: numberOrUndefined(form.prefill_utilization),
     decode_bw_utilization: numberOrUndefined(form.decode_bw_utilization),
     concurrency_degradation: numberOrUndefined(form.concurrency_degradation),
-    refresh: form.refresh,
-    explain: form.explain,
+    explain: true,
     llm_review: form.llm_review,
     llm_review_api_key: form.llm_review ? stringOrUndefined(form.llm_review_api_key) : undefined,
     llm_review_base_url: form.llm_review ? stringOrUndefined(form.llm_review_base_url) : undefined,

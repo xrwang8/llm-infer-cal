@@ -15,4 +15,11 @@ describe('App shell', () => {
 
     expect(html).toContain('data-testid="gpu-model-picker"');
   });
+
+  it('does not render explain or refresh cache controls', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).not.toContain('输出推导链（--explain）');
+    expect(html).not.toContain('刷新缓存');
+  });
 });

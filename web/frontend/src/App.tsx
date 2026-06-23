@@ -55,8 +55,6 @@ const DEFAULT_FORM: EvaluateForm = {
   prefill_utilization: '0.4',
   decode_bw_utilization: '0.5',
   concurrency_degradation: '1',
-  refresh: false,
-  explain: false,
   llm_review: false,
   llm_review_api_key: '',
   llm_review_base_url: '',

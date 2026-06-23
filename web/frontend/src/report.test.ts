@@ -103,16 +103,11 @@ describe('report helpers', () => {
     expect(settings.every((setting) => setting.collapsedByDefault)).toBe(true);
   });
 
-  it('keeps advanced settings aligned with app.py except remote tokens', () => {
+  it('hides explain and refresh from advanced settings', () => {
     const settings = advancedSettings();
 
-    expect(settings.map((setting) => setting.label)).toEqual([
-      '强制 GPU 数',
-      '刷新缓存',
-      '输出推导链（--explain）',
-      'LLM 审计（--llm-review）',
-    ]);
-    expect(settings.map((setting) => setting.key)).toEqual(['gpu_count', 'refresh', 'explain', 'llm_review']);
+    expect(settings.map((setting) => setting.label)).toEqual(['强制 GPU 数', 'LLM 审计（--llm-review）']);
+    expect(settings.map((setting) => setting.key)).toEqual(['gpu_count', 'llm_review']);
     expect(settings.every((setting) => setting.collapsedByDefault)).toBe(true);
   });
 
@@ -140,8 +135,6 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1.67',
-        refresh: true,
-        explain: true,
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
@@ -150,10 +143,30 @@ describe('report helpers', () => {
     ).toMatchObject({
       gpu_count: 2,
       concurrency_degradation: 1.67,
-      refresh: true,
       explain: true,
       llm_review: false,
     });
+    expect(
+      buildEvaluatePayload({
+        model_id: 'Qwen/Qwen3-30B-A3B',
+        source: 'builtin',
+        gpu: 'H100',
+        gpus: ['H100'],
+        engine: 'vllm',
+        gpu_count: '2',
+        context_length: '',
+        input_tokens: '2000',
+        output_tokens: '512',
+        target_tokens_per_sec: '30',
+        prefill_utilization: '0.4',
+        decode_bw_utilization: '0.5',
+        concurrency_degradation: '1.67',
+        llm_review: false,
+        llm_review_api_key: '',
+        llm_review_base_url: '',
+        llm_review_model: '',
+      }),
+    ).not.toHaveProperty('refresh');
   });
 
   it('passes trimmed LLM reviewer settings to the evaluate payload', () => {
@@ -172,8 +185,6 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1',
-        refresh: false,
-        explain: false,
         llm_review: true,
         llm_review_api_key: ' sk-test ',
         llm_review_base_url: ' https://api.deepseek.com/v1/ ',
@@ -203,8 +214,6 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1',
-        refresh: false,
-        explain: false,
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
