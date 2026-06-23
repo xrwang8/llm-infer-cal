@@ -94,6 +94,67 @@ async fn evaluate_endpoint_returns_report_json() {
 }
 
 #[tokio::test]
+async fn evaluate_endpoint_returns_comparison_for_multiple_gpus() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "gpus": ["H100", "A100-80G"],
+        "engine": "vllm"
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    let reports = body["comparison"]["reports"].as_array().unwrap();
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0]["hardware"]["id"], "H100");
+    assert_eq!(reports[1]["hardware"]["id"], "A100-80G");
+    assert_eq!(body["hardware"]["id"], "H100");
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_rejects_more_than_four_comparison_gpus() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "gpus": ["H100", "A100-80G", "H800", "H200", "L40S"],
+        "engine": "vllm"
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = json_response(response).await;
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("at most 4"));
+}
+
+#[tokio::test]
 async fn evaluate_endpoint_can_include_explain_and_llm_review_text() {
     let payload = json!({
         "model_id": "Qwen/Qwen3-30B-A3B",

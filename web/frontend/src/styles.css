@@ -232,6 +232,73 @@ button {
   accent-color: #0f766e;
 }
 
+.gpuPicker {
+  display: grid;
+  gap: 8px;
+}
+
+.gpuOptionGrid {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+  padding: 6px;
+  background: #fbfcfa;
+  border: 1px solid #cfd9d1;
+  border-radius: 8px;
+}
+
+.gpuOption {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 7px;
+  color: #334139;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gpuOption.active {
+  color: #0b4d47;
+  background: #e7f4ef;
+}
+
+.gpuOption input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #0f766e;
+}
+
+.gpuOption small {
+  color: #68756d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.selectedGpuList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.selectedGpuChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  color: #0b4d47;
+  background: #e7f4ef;
+  border: 1px solid #c6e3d8;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 760;
+}
+
 .advancedPanel {
   overflow: hidden;
   background: #fbfcfa;
@@ -430,6 +497,10 @@ button {
 .panel {
   padding: 14px;
   box-shadow: none;
+}
+
+.comparisonPanel {
+  margin-bottom: 12px;
 }
 
 .memoryBars {

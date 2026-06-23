@@ -135,9 +135,7 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
     if req.model_id.trim().is_empty() {
         return Err(ApiError::bad_request("model_id is required"));
     }
-    if req.gpu.trim().is_empty() {
-        return Err(ApiError::bad_request("gpu is required"));
-    }
+    let gpu_ids = requested_gpus(&req)?;
 
     let lang = req.lang.as_deref().unwrap_or("zh");
     if !matches!(lang, "en" | "zh") {
@@ -172,17 +170,34 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
             .unwrap_or(defaults.concurrency_degradation),
     };
 
-    let report = evaluator
-        .evaluate(
-            req.model_id.trim(),
-            req.gpu.trim(),
-            req.engine.trim(),
-            options,
-        )
-        .map_err(ApiError::from_source_error)?;
-    let mut value = render_report_json(&report)
-        .and_then(|json| serde_json::from_str::<Value>(&json))
-        .map_err(ApiError::internal)?;
+    let reports = gpu_ids
+        .iter()
+        .map(|gpu| {
+            evaluator
+                .evaluate(req.model_id.trim(), gpu, req.engine.trim(), options)
+                .map_err(ApiError::from_source_error)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let report_values = reports
+        .iter()
+        .map(report_to_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut value = report_values
+        .first()
+        .cloned()
+        .ok_or_else(|| ApiError::bad_request("gpu is required"))?;
+
+    if report_values.len() >= 2 {
+        value["comparison"] = json!({
+            "reports": report_values,
+        });
+        return Ok(Json(value));
+    }
+
+    let report = reports
+        .first()
+        .ok_or_else(|| ApiError::bad_request("gpu is required"))?;
     if req.explain.unwrap_or(false) || req.llm_review.unwrap_or(false) {
         let explain_entries = build_explain(&report);
         if req.explain.unwrap_or(false) {
@@ -196,6 +211,34 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
     }
 
     Ok(Json(value))
+}
+
+fn requested_gpus(req: &EvaluateRequest) -> Result<Vec<String>, ApiError> {
+    let raw = req.gpus.clone().unwrap_or_else(|| vec![req.gpu.clone()]);
+    let mut gpus = Vec::new();
+    for gpu in raw {
+        let trimmed = gpu.trim();
+        if !trimmed.is_empty() && !gpus.iter().any(|existing| existing == trimmed) {
+            gpus.push(trimmed.to_string());
+        }
+    }
+    if gpus.is_empty() {
+        return Err(ApiError::bad_request("gpu is required"));
+    }
+    if gpus.len() > 4 {
+        return Err(ApiError::bad_request(
+            "gpus accepts at most 4 items for comparison",
+        ));
+    }
+    Ok(gpus)
+}
+
+fn report_to_value(
+    report: &llm_infer_cal_core::core::evaluator::EvaluationReport,
+) -> Result<Value, ApiError> {
+    render_report_json(report)
+        .and_then(|json| serde_json::from_str::<Value>(&json))
+        .map_err(ApiError::internal)
 }
 
 fn source_from_name(name: &str, timeout_s: f64) -> Result<Box<dyn ModelSource>, String> {
@@ -223,6 +266,7 @@ struct EvaluateRequest {
     model_id: String,
     #[serde(default = "default_gpu")]
     gpu: String,
+    gpus: Option<Vec<String>>,
     #[serde(default = "default_engine")]
     engine: String,
     source: Option<String>,
@@ -397,6 +441,7 @@ mod tests {
         EvaluateRequest {
             model_id: "Qwen/Qwen3-30B-A3B".to_string(),
             gpu: "H100".to_string(),
+            gpus: None,
             engine: "vllm".to_string(),
             source: Some("builtin".to_string()),
             gpu_count: None,

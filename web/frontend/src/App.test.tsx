@@ -9,4 +9,10 @@ describe('App shell', () => {
     expect(html).not.toContain('statusRail');
     expect(html).not.toContain('127.0.0.1:8080');
   });
+
+  it('renders the GPU model picker as a multi-select control', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('data-testid="gpu-model-picker"');
+  });
 });

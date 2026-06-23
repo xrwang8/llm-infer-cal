@@ -45,6 +45,7 @@ const DEFAULT_FORM: EvaluateForm = {
   model_id: 'Qwen/Qwen3-30B-A3B',
   source: 'builtin',
   gpu: 'H100',
+  gpus: ['H100'],
   engine: 'vllm',
   gpu_count: '',
   context_length: '',
@@ -105,9 +106,11 @@ export function App() {
     };
   }, []);
 
+  const selectedGpuIds = form.gpus.length ? form.gpus : form.gpu ? [form.gpu] : [];
+  const selectedGpuId = selectedGpuIds[0] ?? '';
   const selectedGpu = useMemo(
-    () => gpus.find((gpu) => gpu.id === form.gpu || gpu.aliases?.includes(form.gpu)),
-    [form.gpu, gpus],
+    () => gpus.find((gpu) => gpu.id === selectedGpuId || gpu.aliases?.includes(selectedGpuId)),
+    [selectedGpuId, gpus],
   );
   const modelGroups = useMemo(() => groupModelsByProvider(models), [models]);
   const gpuGroups = useMemo(() => groupGpusByVendor(gpus), [gpus]);
@@ -115,6 +118,7 @@ export function App() {
   const gpuOptions = useMemo(() => itemsForGroup(gpuGroups, gpuVendor), [gpuGroups, gpuVendor]);
   const selectedFleet = bestFleetOption(report?.fleet);
   const command = report?.generated_command?.command ?? '';
+  const comparisonReports = report?.comparison?.reports ?? [];
   const kvRows = report?.kv_cache_by_context ?? [];
   const weightBytes = annotatedValue<number>(report?.weights?.safetensors_total_bytes);
   const params = annotatedValue<number>(report?.weights?.params_estimated);
@@ -163,9 +167,18 @@ export function App() {
   }
 
   function updateGpuVendor(value: string) {
-    const nextGpus = itemsForGroup(gpuGroups, value);
     setGpuVendor(value);
-    setForm((current) => ({ ...current, gpu: nextGpus[0]?.id ?? current.gpu }));
+  }
+
+  function updateGpuSelection(gpuId: string, checked: boolean) {
+    setForm((current) => {
+      const currentGpus = current.gpus.length ? current.gpus : current.gpu ? [current.gpu] : [];
+      const nextGpus = checked
+        ? [...currentGpus, gpuId].filter((gpu, index, all) => all.indexOf(gpu) === index).slice(0, 4)
+        : currentGpus.filter((gpu) => gpu !== gpuId);
+      const boundedGpus = nextGpus.length ? nextGpus : currentGpus;
+      return { ...current, gpu: boundedGpus[0] ?? '', gpus: boundedGpus };
+    });
   }
 
   function submit(event: FormEvent) {
@@ -276,14 +289,7 @@ export function App() {
 
               <label className="field">
                 <span>GPU 型号</span>
-                <select data-testid="gpu-model-select" value={form.gpu} onChange={(event) => updateField('gpu', event.target.value)}>
-                  {gpuOptions.map((gpu) => (
-                    <option key={gpu.id} value={gpu.id}>
-                      {gpu.id} · {gpu.memory_gb}GB
-                    </option>
-                  ))}
-                  {!gpuOptions.length ? <option value={form.gpu}>{form.gpu}</option> : null}
-                </select>
+                <GpuPicker options={gpuOptions} selected={selectedGpuIds} onToggle={updateGpuSelection} />
               </label>
             </div>
 
@@ -376,7 +382,7 @@ export function App() {
             </details>
           </div>
 
-          <button className="primaryButton" type="submit" disabled={evaluating || !form.model_id.trim()}>
+          <button className="primaryButton" type="submit" disabled={evaluating || !form.model_id.trim() || !selectedGpuIds.length}>
             {evaluating ? <RefreshCcw className="spin" size={18} /> : <Play size={18} />}
             <span>{evaluating ? '计算中' : '开始评估'}</span>
           </button>
@@ -402,6 +408,13 @@ export function App() {
             <Metric icon={<Zap size={18} />} label="Decode 集群" value={`${formatFloat(clusterTps, 1)} tok/s`} detail="估算吞吐" />
             <Metric icon={<RefreshCcw size={18} />} label="Prefill" value={formatMs(prefillMs)} detail={`${form.input_tokens || 2000} tokens`} />
           </div>
+
+          {comparisonReports.length >= 2 ? (
+            <section className="panel comparisonPanel">
+              <SectionHeader icon={<Activity size={18} />} title="GPU 对比" />
+              <ComparisonTable reports={comparisonReports} />
+            </section>
+          ) : null}
 
           <div className="contentGrid">
             <section className="panel">
@@ -481,6 +494,50 @@ function Segmented<T extends string>({
           >
             {option.label}
           </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GpuPicker({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: GpuSummary[];
+  selected: string[];
+  onToggle: (gpuId: string, checked: boolean) => void;
+}) {
+  const visibleOptions: GpuSummary[] = options.length ? options : selected.map((id) => ({ id }));
+  const selectedSet = new Set(selected);
+  const atLimit = selected.length >= 4;
+
+  return (
+    <div className="gpuPicker" data-testid="gpu-model-picker">
+      <div className="gpuOptionGrid">
+        {visibleOptions.map((gpu) => {
+          const checked = selectedSet.has(gpu.id);
+          const disabled = (!checked && atLimit) || (checked && selected.length <= 1);
+          return (
+            <label className={`gpuOption ${checked ? 'active' : ''}`} key={gpu.id}>
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) => onToggle(gpu.id, event.target.checked)}
+              />
+              <span>{gpu.id}</span>
+              <small>{gpu.memory_gb ? `${gpu.memory_gb}GB` : ''}</small>
+            </label>
+          );
+        })}
+      </div>
+      <div className="selectedGpuList">
+        {selected.map((gpu) => (
+          <span className="selectedGpuChip" key={gpu}>
+            {gpu}
+          </span>
         ))}
       </div>
     </div>
@@ -628,6 +685,47 @@ function FleetTable({ options }: { options: FleetOption[] }) {
               </td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ComparisonTable({ reports }: { reports: Report[] }) {
+  return (
+    <div className="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th>
+            <th>显存</th>
+            <th>推荐张数</th>
+            <th>并发</th>
+            <th>Decode</th>
+            <th>Prefill</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reports.map((item) => {
+            const option = bestFleetOption(item.fleet);
+            const concurrent = annotatedValue<number>(item.performance?.max_concurrent);
+            const decode = annotatedValue<number>(item.performance?.decode?.cluster_tokens_per_sec);
+            const prefill = annotatedValue<number>(item.performance?.prefill?.latency_ms);
+            return (
+              <tr key={item.hardware?.id ?? item.generated_command?.command}>
+                <td>{item.hardware?.id ?? '-'}</td>
+                <td>{item.hardware?.memory_gb ? `${item.hardware.memory_gb}GB` : '-'}</td>
+                <td>{option?.gpu_count ? `${option.gpu_count} 张` : '-'}</td>
+                <td>{formatNumber(concurrent)}</td>
+                <td>{`${formatFloat(decode, 1)} tok/s`}</td>
+                <td>{formatMs(prefill)}</td>
+                <td>
+                  <span className={option?.fits ? 'fitText' : 'missText'}>{option?.fits ? '可行' : '不足'}</span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

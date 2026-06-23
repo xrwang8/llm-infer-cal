@@ -80,12 +80,16 @@ export type Report = {
   } | null;
   explain_text?: string | null;
   llm_review_text?: string | null;
+  comparison?: {
+    reports?: Report[];
+  } | null;
 };
 
 export type EvaluateForm = {
   model_id: string;
   source: 'builtin' | 'huggingface' | 'modelscope';
   gpu: string;
+  gpus: string[];
   engine: 'vllm' | 'sglang';
   gpu_count: string;
   context_length: string;
@@ -386,7 +390,8 @@ export function buildEvaluatePayload(form: EvaluateForm) {
   return {
     model_id: form.model_id.trim(),
     source: form.source,
-    gpu: form.gpu,
+    gpu: selectedGpus(form)[0] ?? '',
+    gpus: selectedGpus(form),
     engine: form.engine,
     gpu_count: numberOrUndefined(form.gpu_count),
     context_length: numberOrUndefined(form.context_length),
@@ -404,6 +409,18 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     llm_review_model: form.llm_review ? stringOrUndefined(form.llm_review_model) : undefined,
     lang: 'zh',
   };
+}
+
+function selectedGpus(form: EvaluateForm): string[] {
+  const raw = form.gpus.length ? form.gpus : [form.gpu];
+  const gpus: string[] = [];
+  for (const gpu of raw) {
+    const trimmed = gpu.trim();
+    if (trimmed && !gpus.includes(trimmed)) {
+      gpus.push(trimmed);
+    }
+  }
+  return gpus.slice(0, 4);
 }
 
 export function tierText(tier: string | null | undefined): string {

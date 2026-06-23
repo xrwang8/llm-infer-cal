@@ -130,6 +130,7 @@ describe('report helpers', () => {
         model_id: 'Qwen/Qwen3-30B-A3B',
         source: 'builtin',
         gpu: 'H100',
+        gpus: ['H100'],
         engine: 'vllm',
         gpu_count: '2',
         context_length: '',
@@ -161,6 +162,7 @@ describe('report helpers', () => {
         model_id: 'Qwen/Qwen3-30B-A3B',
         source: 'builtin',
         gpu: 'H100',
+        gpus: ['H100'],
         engine: 'vllm',
         gpu_count: '',
         context_length: '',
@@ -182,6 +184,35 @@ describe('report helpers', () => {
       llm_review_api_key: 'sk-test',
       llm_review_base_url: 'https://api.deepseek.com/v1/',
       llm_review_model: 'deepseek-chat',
+    });
+  });
+
+  it('passes up to four selected GPUs for comparison while keeping the first GPU for compatibility', () => {
+    expect(
+      buildEvaluatePayload({
+        model_id: 'Qwen/Qwen3-30B-A3B',
+        source: 'builtin',
+        gpu: 'H100',
+        gpus: ['H100', 'A100-80G', 'H800', 'H200', 'L40S'],
+        engine: 'vllm',
+        gpu_count: '',
+        context_length: '',
+        input_tokens: '2000',
+        output_tokens: '512',
+        target_tokens_per_sec: '30',
+        prefill_utilization: '0.4',
+        decode_bw_utilization: '0.5',
+        concurrency_degradation: '1',
+        refresh: false,
+        explain: false,
+        llm_review: false,
+        llm_review_api_key: '',
+        llm_review_base_url: '',
+        llm_review_model: '',
+      }),
+    ).toMatchObject({
+      gpu: 'H100',
+      gpus: ['H100', 'A100-80G', 'H800', 'H200'],
     });
   });
 });
