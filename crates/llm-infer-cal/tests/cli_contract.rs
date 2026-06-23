@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use llm_infer_cal::{run_with_args, CliExit};
 
@@ -9,6 +9,7 @@ const USAGE_OPTIONS: &[&str] = &[
     "--gpu-count",
     "--context-length",
     "--refresh",
+    "--timeout-s",
     "--lang",
     "--list-gpus",
     "--benchmark",
@@ -26,9 +27,13 @@ const USAGE_OPTIONS: &[&str] = &[
     "--help",
 ];
 
-fn run_cli<const N: usize>(args: [&str; N]) -> CliExit {
+fn cli_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
+fn run_cli<const N: usize>(args: [&str; N]) -> CliExit {
+    let _guard = cli_lock();
     run_with_args(args.map(OsString::from))
 }
 
@@ -117,6 +122,8 @@ fn all_runtime_flags_parse_before_source_validation() {
         "--context-length",
         "4096",
         "--refresh",
+        "--timeout-s",
+        "90",
         "--input-tokens",
         "123",
         "--output-tokens",
@@ -138,6 +145,30 @@ fn all_runtime_flags_parse_before_source_validation() {
     assert_eq!(exit.code, 1);
     assert!(exit.stdout.is_empty());
     assert!(exit.stderr.contains("未知 --source 'mirror'"));
+}
+
+#[test]
+fn huggingface_endpoint_env_is_used_by_rust_cli() {
+    let _guard = cli_lock();
+    std::env::set_var("HF_ENDPOINT", "http://127.0.0.1:9");
+
+    let exit = run_with_args([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "owner/repo",
+        "--gpu",
+        "H800",
+        "--timeout-s",
+        "0.001",
+    ]);
+
+    std::env::remove_var("HF_ENDPOINT");
+
+    assert_eq!(exit.code, 4);
+    assert!(exit.stdout.is_empty());
+    assert!(exit.stderr.contains("127.0.0.1:9"));
+    assert!(!exit.stderr.contains("huggingface.co"));
 }
 
 #[test]

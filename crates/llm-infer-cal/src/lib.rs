@@ -12,7 +12,7 @@ use llm_infer_cal_core::hardware::loader::load_database;
 use llm_infer_cal_core::llm_review::reviewer::run_review;
 use llm_infer_cal_core::model_source::base::{ModelSource, ModelSourceError};
 use llm_infer_cal_core::model_source::huggingface::HuggingFaceSource;
-use llm_infer_cal_core::model_source::modelscope::ModelScopeSource;
+use llm_infer_cal_core::model_source::modelscope::{ModelScopeSource, DEFAULT_REVISION};
 use llm_infer_cal_core::output::formatter::{
     render_explain_text, render_gpu_list_text, render_llm_review_text, render_report_text,
 };
@@ -35,6 +35,8 @@ Options:
           Context length for KV cache estimation
       --refresh
           Bypass cache and re-fetch
+      --timeout-s <TIMEOUT_S>
+          Network timeout in seconds for model metadata requests [default: 30]
       --lang <LANG>
           Output language: en | zh (default auto-detects from LANG env)
       --list-gpus
@@ -73,6 +75,7 @@ const COMPLETION_OPTIONS: &[&str] = &[
     "--gpu-count",
     "--context-length",
     "--refresh",
+    "--timeout-s",
     "--lang",
     "--list-gpus",
     "--benchmark",
@@ -126,6 +129,10 @@ struct Cli {
     /// Bypass cache and re-fetch
     #[arg(long)]
     refresh: bool,
+
+    /// Network timeout in seconds for model metadata requests.
+    #[arg(long = "timeout-s", default_value_t = 30.0)]
+    timeout_s: f64,
 
     /// Output language: en | zh (default auto-detects from LANG env)
     #[arg(long)]
@@ -212,6 +219,9 @@ where
     if matches!(cli.lang.as_deref(), Some("en" | "zh")) {
         set_locale(cli.lang.as_deref().unwrap());
     }
+    if cli.timeout_s <= 0.0 {
+        return CliExit::err(1, "--timeout-s must be greater than 0.\n");
+    }
 
     if cli.list_gpus {
         return match load_database() {
@@ -243,7 +253,7 @@ where
         return CliExit::err(1, format!("{}\n", t("cli.err.missing_gpu")));
     };
 
-    let source = match source_from_name(&cli.source) {
+    let source = match source_from_name(&cli.source, cli.timeout_s) {
         Ok(source) => source,
         Err(message) => return CliExit::err(1, message),
     };
@@ -303,10 +313,23 @@ impl CliExit {
     }
 }
 
-fn source_from_name(name: &str) -> Result<Box<dyn ModelSource>, String> {
+fn source_from_name(name: &str, timeout_s: f64) -> Result<Box<dyn ModelSource>, String> {
     match name.to_lowercase().as_str() {
-        "hf" | "huggingface" => Ok(Box::<HuggingFaceSource>::default()),
-        "ms" | "modelscope" => Ok(Box::<ModelScopeSource>::default()),
+        "hf" | "huggingface" => {
+            let endpoint = env_nonempty("HF_ENDPOINT");
+            Ok(Box::new(HuggingFaceSource::new(
+                endpoint.as_deref(),
+                timeout_s,
+            )))
+        }
+        "ms" | "modelscope" => {
+            let endpoint = env_nonempty("MODELSCOPE_ENDPOINT");
+            Ok(Box::new(ModelScopeSource::new(
+                endpoint.as_deref(),
+                timeout_s,
+                DEFAULT_REVISION,
+            )))
+        }
         _ => Err(format!(
             "{}\n",
             t_with(
@@ -315,6 +338,10 @@ fn source_from_name(name: &str) -> Result<Box<dyn ModelSource>, String> {
             )
         )),
     }
+}
+
+fn env_nonempty(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
 }
 
 fn source_error_exit(error: ModelSourceError) -> CliExit {
