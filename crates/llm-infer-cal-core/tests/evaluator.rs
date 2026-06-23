@@ -1,6 +1,6 @@
 use llm_infer_cal_core::core::evaluator::{EvaluationOptions, Evaluator};
 use llm_infer_cal_core::model_source::base::{
-    ModelArtifact, ModelSource, ModelSourceError, SiblingFile,
+    ModelArtifact, ModelNotFoundError, ModelSource, ModelSourceError, SiblingFile,
 };
 use serde_json::json;
 
@@ -18,6 +18,26 @@ impl ModelSource for StaticSource {
     fn fetch(&self, model_id: &str) -> Result<ModelArtifact, ModelSourceError> {
         assert_eq!(model_id, self.artifact.model_id);
         Ok(self.artifact.clone())
+    }
+}
+
+#[derive(Clone)]
+struct MultiSource {
+    name: &'static str,
+    artifacts: Vec<ModelArtifact>,
+}
+
+impl ModelSource for MultiSource {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn fetch(&self, model_id: &str) -> Result<ModelArtifact, ModelSourceError> {
+        self.artifacts
+            .iter()
+            .find(|artifact| artifact.model_id == model_id)
+            .cloned()
+            .ok_or_else(|| ModelSourceError::NotFound(ModelNotFoundError(model_id.to_string())))
     }
 }
 
@@ -115,6 +135,36 @@ fn moe_evaluator() -> Evaluator {
     Evaluator::without_cache(Box::new(StaticSource {
         name: "huggingface",
         artifact: moe_artifact(),
+    }))
+}
+
+fn draft_artifact() -> ModelArtifact {
+    ModelArtifact {
+        source: "huggingface".to_string(),
+        model_id: "test/draft-mini".to_string(),
+        commit_sha: Some("draftsha".to_string()),
+        config: json!({
+            "model_type": "llama",
+            "architectures": ["LlamaForCausalLM"],
+            "num_hidden_layers": 1,
+            "hidden_size": 8,
+            "vocab_size": 64,
+            "num_attention_heads": 2,
+            "num_key_value_heads": 2,
+            "intermediate_size": 16,
+            "max_position_embeddings": 4096
+        }),
+        siblings: vec![SiblingFile {
+            filename: "draft.safetensors".to_string(),
+            size: Some(2_048),
+        }],
+    }
+}
+
+fn speculative_evaluator() -> Evaluator {
+    Evaluator::without_cache(Box::new(MultiSource {
+        name: "huggingface",
+        artifacts: vec![llama_artifact(), draft_artifact()],
     }))
 }
 
@@ -264,6 +314,63 @@ fn evaluate_applies_kv_bits_and_paged_attention_to_kv_cache() {
         .as_deref()
         .unwrap_or("")
         .contains("paged"));
+}
+
+#[test]
+fn evaluate_adds_draft_model_safetensors_to_gpu_resident_weights() {
+    let report = speculative_evaluator()
+        .evaluate(
+            "test/llama-mini",
+            "H800",
+            "vllm",
+            EvaluationOptions {
+                gpu_count: Some(1),
+                context_length: Some(4096),
+                target_concurrent_requests: Some(3),
+                speculative_draft_model_id: Some("test/draft-mini".to_string()),
+                ..EvaluationOptions::default()
+            },
+        )
+        .unwrap();
+
+    let option = &report.fleet.as_ref().unwrap().options[0];
+    assert_eq!(report.speculative_weight_bytes.value, 2_048);
+    assert_eq!(report.speculative_weight_bytes.label.as_str(), "verified");
+    assert_eq!(option.tier, "target");
+    assert_eq!(option.tier_concurrent_requests, 3);
+    assert_eq!(option.speculative_weight_bytes_per_gpu, 2_048);
+    assert_eq!(
+        option.weight_bytes_per_gpu,
+        option.main_weight_bytes_per_gpu + 2_048
+    );
+    assert!(option.required_bytes_per_gpu_at_tier > option.main_weight_bytes_per_gpu);
+    let command = report.generated_command.as_deref().unwrap();
+    assert!(command.contains("--speculative-config"));
+    assert!(command.contains("\"model\":\"test/draft-mini\""));
+    assert!(command.contains("\"num_speculative_tokens\":4"));
+}
+
+#[test]
+fn evaluate_adds_sglang_draft_model_path_to_generated_command() {
+    let report = speculative_evaluator()
+        .evaluate(
+            "test/llama-mini",
+            "H800",
+            "sglang",
+            EvaluationOptions {
+                gpu_count: Some(1),
+                context_length: Some(4096),
+                target_concurrent_requests: Some(3),
+                speculative_draft_model_id: Some("test/draft-mini".to_string()),
+                ..EvaluationOptions::default()
+            },
+        )
+        .unwrap();
+
+    let command = report.generated_command.as_deref().unwrap();
+    assert!(command.contains("--speculative-algorithm STANDALONE"));
+    assert!(command.contains("--speculative-draft-model-path test/draft-mini"));
+    assert!(command.contains("--speculative-num-draft-tokens 7"));
 }
 
 #[test]

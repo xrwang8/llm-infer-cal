@@ -99,6 +99,10 @@ pub fn render_report_json(report: &EvaluationReport) -> Result<String, serde_jso
         "inference_options": {
             "kv_cache_bits": report.kv_cache_bits,
             "paged_attention": report.paged_attention,
+            "target_concurrent_requests": report.perf_target_concurrent_requests,
+            "speculative_draft_model_id": report.speculative_draft_model_id,
+            "speculative_extra_weight_bytes": annotated_u64(&report.speculative_weight_bytes),
+            "cpu_offload_bytes_per_gpu": report.cpu_offload_bytes_per_gpu,
         },
         "engine_compatibility": engine_json(report),
         "hardware": hardware_json(report),
@@ -905,6 +909,9 @@ fn fleet_json(report: &EvaluationReport) -> Value {
                 "tensor_parallel_size": option.tensor_parallel_size,
                 "pipeline_parallel_size": option.pipeline_parallel_size,
                 "node_count": option.node_count,
+                "main_weight_bytes_per_gpu": option.main_weight_bytes_per_gpu,
+                "speculative_weight_bytes_per_gpu": option.speculative_weight_bytes_per_gpu,
+                "cpu_offload_bytes_per_gpu": option.cpu_offload_bytes_per_gpu,
                 "weight_bytes_per_gpu": option.weight_bytes_per_gpu,
                 "kv_bytes_per_request": option.kv_bytes_per_request,
                 "kv_bytes_per_request_per_gpu": option.kv_bytes_per_request_per_gpu,
@@ -943,6 +950,9 @@ fn performance_json(report: &EvaluationReport) -> Value {
         "options": {
             "kv_cache_bits": report.kv_cache_bits,
             "paged_attention": report.paged_attention,
+            "target_concurrent_requests": report.perf_target_concurrent_requests,
+            "cpu_offload_bytes_per_gpu": report.cpu_offload_bytes_per_gpu,
+            "speculative_extra_weight_bytes": annotated_u64(&report.speculative_weight_bytes),
         },
         "prefill": {
             "total_flops": annotated_u64(&prefill.total_flops),

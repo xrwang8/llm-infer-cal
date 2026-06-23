@@ -26,6 +26,8 @@ fn vllm_basic_shape_matches_rust_contract() {
         None,
         None,
         None,
+        None,
+        None,
     );
 
     assert!(cmd.contains("vllm serve meta-llama/Llama-3.3-70B"));
@@ -43,6 +45,8 @@ fn vllm_trust_remote_code_heuristic_matches_rust_contract() {
         None,
         None,
         None,
+        None,
+        None,
     );
     let deepseek = generate_vllm_command(
         "deepseek-ai/DeepSeek-V4-Flash",
@@ -51,11 +55,15 @@ fn vllm_trust_remote_code_heuristic_matches_rust_contract() {
         None,
         None,
         None,
+        None,
+        None,
     );
     let qwen36 = generate_vllm_command(
         "Qwen/Qwen3.6-35B-A3B",
         &profile("qwen3_5_moe_text", Some(262_144)),
         Parallelism::single(1),
+        None,
+        None,
         None,
         None,
         None,
@@ -77,6 +85,8 @@ fn vllm_max_model_len_override_matches_rust_contract() {
         None,
         Some(32_768),
         None,
+        None,
+        None,
     );
 
     assert!(cmd.contains("--max-model-len 32768"));
@@ -92,10 +102,46 @@ fn vllm_concurrency_limit_uses_max_num_seqs() {
         None,
         Some(262_144),
         Some(12),
+        None,
+        None,
     );
 
     assert!(cmd.contains("--max-model-len 262144"));
     assert!(cmd.contains("--max-num-seqs 12"));
+}
+
+#[test]
+fn vllm_cpu_offload_gb_is_rendered_when_configured() {
+    let cmd = generate_vllm_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(8),
+        None,
+        Some(262_144),
+        Some(12),
+        Some(1.25),
+        None,
+    );
+
+    assert!(cmd.contains("--cpu-offload-gb 1.25"));
+}
+
+#[test]
+fn vllm_speculative_config_is_rendered_for_draft_model() {
+    let cmd = generate_vllm_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(8),
+        None,
+        Some(262_144),
+        Some(12),
+        None,
+        Some("Qwen/Qwen2.5-1.5B-Instruct"),
+    );
+
+    assert!(cmd.contains("--speculative-config"));
+    assert!(cmd.contains("\"model\":\"Qwen/Qwen2.5-1.5B-Instruct\""));
+    assert!(cmd.contains("\"num_speculative_tokens\":4"));
 }
 
 #[test]
@@ -117,6 +163,8 @@ fn vllm_entry_flags_are_appended_verbatim() {
         Some(&entry),
         None,
         None,
+        None,
+        None,
     );
 
     assert!(cmd.contains("--attention-backend auto"));
@@ -128,6 +176,8 @@ fn sglang_basic_shape_matches_rust_contract() {
         "deepseek-ai/DeepSeek-V3.2",
         &profile("deepseek_v3_2", Some(131_072)),
         Parallelism::single(8),
+        None,
+        None,
         None,
         None,
         None,
@@ -158,6 +208,8 @@ fn sglang_entry_required_flags_are_appended_verbatim() {
         Some(&entry),
         None,
         None,
+        None,
+        None,
     );
 
     assert!(cmd.contains("--attention-backend nsa"));
@@ -172,10 +224,48 @@ fn sglang_concurrency_limit_uses_max_running_requests() {
         None,
         Some(262_144),
         Some(12),
+        None,
+        None,
     );
 
     assert!(cmd.contains("--context-length 262144"));
     assert!(cmd.contains("--max-running-requests 12"));
+}
+
+#[test]
+fn sglang_cpu_offload_gb_is_rendered_when_configured() {
+    let cmd = generate_sglang_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(8),
+        None,
+        Some(262_144),
+        Some(12),
+        Some(1.25),
+        None,
+    );
+
+    assert!(cmd.contains("--cpu-offload-gb 1.25"));
+}
+
+#[test]
+fn sglang_speculative_flags_are_rendered_for_standalone_draft_model() {
+    let cmd = generate_sglang_command(
+        "Qwen/Qwen3.6-35B-A3B",
+        &profile("qwen3_5_moe_text", Some(262_144)),
+        Parallelism::single(8),
+        None,
+        Some(262_144),
+        Some(12),
+        None,
+        Some("Qwen/Qwen2.5-1.5B-Instruct"),
+    );
+
+    assert!(cmd.contains("--speculative-algorithm STANDALONE"));
+    assert!(cmd.contains("--speculative-draft-model-path Qwen/Qwen2.5-1.5B-Instruct"));
+    assert!(cmd.contains("--speculative-num-steps 4"));
+    assert!(cmd.contains("--speculative-eagle-topk 2"));
+    assert!(cmd.contains("--speculative-num-draft-tokens 7"));
 }
 
 #[test]
@@ -190,6 +280,8 @@ fn vllm_multinode_command_uses_tp_per_node_and_pp_nodes() {
         },
         None,
         Some(1_048_576),
+        None,
+        None,
         None,
     );
 
@@ -210,6 +302,8 @@ fn sglang_multinode_command_uses_total_tp_and_node_bootstrap_flags() {
         },
         None,
         Some(1_048_576),
+        None,
+        None,
         None,
     );
 

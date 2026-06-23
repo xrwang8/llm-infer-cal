@@ -140,6 +140,86 @@ async fn evaluate_endpoint_accepts_inference_optimization_options() {
 }
 
 #[tokio::test]
+async fn evaluate_endpoint_accepts_memory_pressure_options() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "engine": "vllm",
+        "gpu_count": 1,
+        "context_length": 4096,
+        "target_concurrent_requests": 3,
+        "speculative_extra_weight_bytes": 2048,
+        "cpu_offload_gb": 1.0
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    assert_eq!(body["inference_options"]["target_concurrent_requests"], 3);
+    assert_eq!(
+        body["inference_options"]["speculative_extra_weight_bytes"]["value"],
+        2048
+    );
+    assert_eq!(
+        body["inference_options"]["cpu_offload_bytes_per_gpu"],
+        1_073_741_824
+    );
+    assert_eq!(body["fleet"]["best_tier"], "target");
+    assert_eq!(body["fleet"]["options"][0]["tier_concurrent_requests"], 3);
+    assert_eq!(
+        body["fleet"]["options"][0]["speculative_weight_bytes_per_gpu"],
+        2048
+    );
+    assert_eq!(
+        body["fleet"]["options"][0]["cpu_offload_bytes_per_gpu"],
+        1_073_741_824
+    );
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_includes_draft_model_in_generated_command() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "engine": "vllm",
+        "target_concurrent_requests": 2,
+        "speculative_draft_model_id": "Qwen/Qwen3-0.6B"
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    let command = body["generated_command"]["command"].as_str().unwrap();
+    assert!(command.contains("--max-num-seqs 2"));
+    assert!(command.contains("--speculative-config"));
+    assert!(command.contains("\"model\":\"Qwen/Qwen3-0.6B\""));
+}
+
+#[tokio::test]
 async fn evaluate_endpoint_returns_comparison_for_multiple_gpus() {
     let payload = json!({
         "model_id": "Qwen/Qwen3-30B-A3B",

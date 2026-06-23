@@ -12,12 +12,13 @@ use crate::core::cache::{ArtifactCache, CacheKey};
 use crate::engine_compat::loader::find_match;
 use crate::engine_compat::EngineCompatEntry;
 use crate::fleet::planner::{
-    effective_kv_shards, plan_with_activation, FleetOption, FleetRecommendation,
+    effective_kv_shards, plan_with_memory_options, FleetMemoryOptions, FleetOption,
+    FleetRecommendation,
 };
 use crate::hardware::loader::{lookup, GPUSpec};
 use crate::model_source::base::{ModelArtifact, ModelSource, ModelSourceError};
 use crate::model_source::huggingface::HuggingFaceSource;
-use crate::output::labels::AnnotatedValue;
+use crate::output::labels::{AnnotatedValue, Label};
 use crate::performance::compute::{
     estimate_decode, estimate_prefill, DecodeEstimate, PrefillEstimate,
     DEFAULT_CLUSTER_COMM_EFFICIENCY, DEFAULT_DECODE_BW_UTILIZATION, DEFAULT_PREFILL_UTILIZATION,
@@ -30,7 +31,7 @@ use crate::weight_analyzer::{analyze, WeightReport};
 
 const KV_REFERENCE_CTX: u64 = 131_072;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EvaluationOptions {
     pub gpu_count: Option<u64>,
     pub context_length: Option<u64>,
@@ -43,6 +44,10 @@ pub struct EvaluationOptions {
     pub concurrency_degradation: f64,
     pub kv_cache_bits: u64,
     pub paged_attention: bool,
+    pub target_concurrent_requests: Option<u64>,
+    pub speculative_draft_model_id: Option<String>,
+    pub speculative_extra_weight_bytes: u64,
+    pub cpu_offload_bytes_per_gpu: u64,
 }
 
 impl Default for EvaluationOptions {
@@ -59,6 +64,10 @@ impl Default for EvaluationOptions {
             concurrency_degradation: 1.0,
             kv_cache_bits: 16,
             paged_attention: false,
+            target_concurrent_requests: None,
+            speculative_draft_model_id: None,
+            speculative_extra_weight_bytes: 0,
+            cpu_offload_bytes_per_gpu: 0,
         }
     }
 }
@@ -76,6 +85,9 @@ pub struct EvaluationReport {
     pub weight: WeightReport,
     pub total_params_estimate: AnnotatedValue<u64>,
     pub active_params_estimate: AnnotatedValue<u64>,
+    pub speculative_weight_bytes: AnnotatedValue<u64>,
+    pub speculative_draft_model_id: Option<String>,
+    pub cpu_offload_bytes_per_gpu: u64,
     pub reconciliation: ReconciliationReport,
     pub kv_cache_by_context: BTreeMap<u64, AnnotatedValue<u64>>,
     pub activation_by_context: BTreeMap<u64, AnnotatedValue<u64>>,
@@ -90,6 +102,7 @@ pub struct EvaluationReport {
     pub perf_input_tokens: Option<u64>,
     pub perf_output_tokens: Option<u64>,
     pub perf_target_tokens_per_sec: Option<f64>,
+    pub perf_target_concurrent_requests: Option<u64>,
 }
 
 pub struct Evaluator {
@@ -150,6 +163,8 @@ impl Evaluator {
             if total_params > 0 { total_params } else { 1 },
             fingerprint.as_ref(),
         );
+        let speculative_weight_bytes =
+            self.resolve_speculative_weight_bytes(&options, options.refresh)?;
 
         let contexts_to_report = select_context_lengths(&profile, options.context_length);
         let kv_cache_by_context = contexts_to_report
@@ -208,7 +223,7 @@ impl Evaluator {
                     .get(&reference_ctx)
                     .map(|value| value.value)
                     .unwrap_or(0);
-                let recommendation = plan_with_activation(
+                let recommendation = plan_with_memory_options(
                     &profile,
                     weight.total_bytes.value,
                     kv_ref_bytes.max(1),
@@ -218,8 +233,19 @@ impl Evaluator {
                     options.gpu_count,
                     &kv_by_context_bytes,
                     &activation_by_context_bytes,
+                    FleetMemoryOptions {
+                        target_concurrent_requests: options.target_concurrent_requests,
+                        speculative_weight_bytes: speculative_weight_bytes.value,
+                        cpu_offload_bytes_per_gpu: options.cpu_offload_bytes_per_gpu,
+                    },
                 );
                 if let Some(chosen_option) = recommendation.best_option() {
+                    let command_concurrency = if chosen_option.tier == "target" {
+                        Some(chosen_option.tier_concurrent_requests)
+                    } else {
+                        (chosen_option.max_concurrent_at_reference_ctx > 0)
+                            .then_some(chosen_option.max_concurrent_at_reference_ctx)
+                    };
                     generated_command = Some(generate_command(
                         engine,
                         model_id,
@@ -227,8 +253,8 @@ impl Evaluator {
                         chosen_option,
                         engine_match.as_ref(),
                         options.context_length,
-                        (chosen_option.max_concurrent_at_reference_ctx > 0)
-                            .then_some(chosen_option.max_concurrent_at_reference_ctx),
+                        command_concurrency,
+                        options.speculative_draft_model_id.as_deref(),
                     ));
                 }
                 fleet = Some(recommendation);
@@ -304,6 +330,9 @@ impl Evaluator {
             weight,
             total_params_estimate,
             active_params_estimate,
+            speculative_weight_bytes,
+            speculative_draft_model_id: options.speculative_draft_model_id,
+            cpu_offload_bytes_per_gpu: options.cpu_offload_bytes_per_gpu,
             reconciliation,
             kv_cache_by_context,
             activation_by_context,
@@ -319,6 +348,7 @@ impl Evaluator {
             perf_output_tokens: has_fleet.then_some(options.output_tokens.unwrap_or(512)),
             perf_target_tokens_per_sec: has_fleet
                 .then_some(options.target_tokens_per_sec.unwrap_or(30.0)),
+            perf_target_concurrent_requests: options.target_concurrent_requests,
         })
     }
 
@@ -332,6 +362,46 @@ impl Evaluator {
             let _ = cache.set(&key, &artifact);
         }
         Ok(artifact)
+    }
+
+    fn resolve_speculative_weight_bytes(
+        &self,
+        options: &EvaluationOptions,
+        refresh: bool,
+    ) -> Result<AnnotatedValue<u64>, ModelSourceError> {
+        let explicit = options.speculative_extra_weight_bytes;
+        let Some(draft_model_id) = options
+            .speculative_draft_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            return Ok(if explicit > 0 {
+                AnnotatedValue::new(
+                    explicit,
+                    Label::Estimated,
+                    Some("user-provided speculative extra weight bytes"),
+                )
+            } else {
+                AnnotatedValue::new(
+                    0,
+                    Label::Verified,
+                    Some("no separate draft model configured"),
+                )
+            });
+        };
+
+        let draft = self.fetch(draft_model_id, refresh)?;
+        let draft_bytes = safetensors_total_bytes(&draft.siblings);
+        let total = draft_bytes + explicit;
+        let source = if explicit > 0 {
+            format!(
+                "draft model {draft_model_id} safetensors bytes ({draft_bytes}) + user-provided extra bytes ({explicit})"
+            )
+        } else {
+            format!("draft model {draft_model_id} safetensors bytes")
+        };
+        Ok(AnnotatedValue::new(total, Label::Verified, Some(&source)))
     }
 
     fn resolve_quant_fingerprint(
@@ -372,6 +442,14 @@ impl Evaluator {
 
         from_safetensors_dtypes(&dtypes).or(fp)
     }
+}
+
+fn safetensors_total_bytes(siblings: &[crate::model_source::base::SiblingFile]) -> u64 {
+    siblings
+        .iter()
+        .filter(|sibling| sibling.filename.ends_with(".safetensors"))
+        .map(|sibling| sibling.size.unwrap_or(0))
+        .sum()
 }
 
 fn fingerprint_matches_bytes(
@@ -441,6 +519,7 @@ fn generate_command(
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
     max_concurrent_requests: Option<u64>,
+    speculative_draft_model_id: Option<&str>,
 ) -> String {
     let parallelism = Parallelism {
         total_gpus: option.gpu_count,
@@ -450,6 +529,8 @@ fn generate_command(
     let max_model_len = max_model_len
         .or_else(|| model_max_context(profile))
         .or(Some(option.kv_reference_context_tokens));
+    let cpu_offload_gb = (option.cpu_offload_bytes_per_gpu > 0)
+        .then_some(option.cpu_offload_bytes_per_gpu as f64 / 1024.0 / 1024.0 / 1024.0);
     if engine.trim().eq_ignore_ascii_case("sglang") {
         generate_sglang_command(
             model_id,
@@ -458,6 +539,8 @@ fn generate_command(
             entry,
             max_model_len,
             max_concurrent_requests,
+            cpu_offload_gb,
+            speculative_draft_model_id,
         )
     } else {
         generate_vllm_command(
@@ -467,6 +550,8 @@ fn generate_command(
             entry,
             max_model_len,
             max_concurrent_requests,
+            cpu_offload_gb,
+            speculative_draft_model_id,
         )
     }
 }

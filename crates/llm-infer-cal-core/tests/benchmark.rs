@@ -62,6 +62,9 @@ fn fake_report(
         },
         total_params_estimate: AnnotatedValue::new(284_000_000_000, Label::Estimated, None),
         active_params_estimate: AnnotatedValue::new(37_000_000_000, Label::Estimated, None),
+        speculative_weight_bytes: AnnotatedValue::new(0, Label::Verified, None),
+        speculative_draft_model_id: None,
+        cpu_offload_bytes_per_gpu: 0,
         reconciliation: ReconciliationReport {
             observed_bytes: weight_bytes,
             total_params: 284_000_000_000,
@@ -81,6 +84,7 @@ fn fake_report(
         perf_input_tokens: None,
         perf_output_tokens: None,
         perf_target_tokens_per_sec: None,
+        perf_target_concurrent_requests: None,
     }
 }
 
@@ -92,6 +96,9 @@ fn prod_fleet(gpu_count: u64) -> FleetRecommendation {
             tensor_parallel_size: gpu_count,
             pipeline_parallel_size: 1,
             node_count: 1,
+            main_weight_bytes_per_gpu: 1,
+            speculative_weight_bytes_per_gpu: 0,
+            cpu_offload_bytes_per_gpu: 0,
             weight_bytes_per_gpu: 1,
             kv_bytes_per_request: 1,
             kv_bytes_per_request_per_gpu: 1,

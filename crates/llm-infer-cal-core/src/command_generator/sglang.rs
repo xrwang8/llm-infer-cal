@@ -1,5 +1,7 @@
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::{entry_has_flag, needs_trust_remote_code, render_flag, Parallelism};
+use crate::command_generator::{
+    entry_has_flag, format_gib, needs_trust_remote_code, nonempty, render_flag, Parallelism,
+};
 use crate::engine_compat::EngineCompatEntry;
 
 pub fn generate_sglang_command(
@@ -9,6 +11,8 @@ pub fn generate_sglang_command(
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
     max_concurrent_requests: Option<u64>,
+    cpu_offload_gb: Option<f64>,
+    speculative_draft_model_id: Option<&str>,
 ) -> String {
     let launch = match entry {
         Some(entry) if !entry.env.is_empty() => {
@@ -55,6 +59,28 @@ pub fn generate_sglang_command(
 
     if !entry_has_flag(entry, "--mem-fraction-static") {
         lines.push("  --mem-fraction-static 0.9".to_string());
+    }
+    if let Some(cpu_offload_gb) = cpu_offload_gb.filter(|value| *value > 0.0) {
+        if !entry_has_flag(entry, "--cpu-offload-gb") {
+            lines.push(format!("  --cpu-offload-gb {}", format_gib(cpu_offload_gb)));
+        }
+    }
+    if let Some(draft_model_id) = nonempty(speculative_draft_model_id) {
+        if !entry_has_flag(entry, "--speculative-algorithm") {
+            lines.push("  --speculative-algorithm STANDALONE".to_string());
+        }
+        if !entry_has_flag(entry, "--speculative-draft-model-path") {
+            lines.push(format!("  --speculative-draft-model-path {draft_model_id}"));
+        }
+        if !entry_has_flag(entry, "--speculative-num-steps") {
+            lines.push("  --speculative-num-steps 4".to_string());
+        }
+        if !entry_has_flag(entry, "--speculative-eagle-topk") {
+            lines.push("  --speculative-eagle-topk 2".to_string());
+        }
+        if !entry_has_flag(entry, "--speculative-num-draft-tokens") {
+            lines.push("  --speculative-num-draft-tokens 7".to_string());
+        }
     }
 
     if let Some(entry) = entry {

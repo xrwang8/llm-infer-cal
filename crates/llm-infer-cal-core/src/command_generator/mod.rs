@@ -41,6 +41,25 @@ fn entry_has_flag(entry: Option<&EngineCompatEntry>, flag: &str) -> bool {
     })
 }
 
+fn format_gib(value: f64) -> String {
+    let mut text = format!("{value:.3}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn needs_trust_remote_code(model_type: &str) -> bool {
     model_type.starts_with("deepseek")
         || model_type.starts_with("glm")

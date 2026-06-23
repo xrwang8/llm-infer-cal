@@ -1,6 +1,10 @@
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::{entry_has_flag, needs_trust_remote_code, render_flag, Parallelism};
+use crate::command_generator::{
+    entry_has_flag, format_gib, needs_trust_remote_code, nonempty, render_flag, shell_single_quote,
+    Parallelism,
+};
 use crate::engine_compat::EngineCompatEntry;
+use serde_json::json;
 
 pub fn generate_vllm_command(
     model_id: &str,
@@ -9,6 +13,8 @@ pub fn generate_vllm_command(
     entry: Option<&EngineCompatEntry>,
     max_model_len: Option<u64>,
     max_concurrent_requests: Option<u64>,
+    cpu_offload_gb: Option<f64>,
+    speculative_draft_model_id: Option<&str>,
 ) -> String {
     let mut lines = vec![
         format!("vllm serve {model_id}"),
@@ -46,6 +52,25 @@ pub fn generate_vllm_command(
     }
 
     lines.push("  --gpu-memory-utilization 0.9".to_string());
+    if let Some(cpu_offload_gb) = cpu_offload_gb.filter(|value| *value > 0.0) {
+        if !entry_has_flag(entry, "--cpu-offload-gb") {
+            lines.push(format!("  --cpu-offload-gb {}", format_gib(cpu_offload_gb)));
+        }
+    }
+    if let Some(draft_model_id) = nonempty(speculative_draft_model_id) {
+        if !entry_has_flag(entry, "--speculative-config")
+            && !entry_has_flag(entry, "--speculative-model")
+        {
+            let config = json!({
+                "model": draft_model_id,
+                "num_speculative_tokens": 4
+            });
+            lines.push(format!(
+                "  --speculative-config {}",
+                shell_single_quote(&config.to_string())
+            ));
+        }
+    }
 
     if let Some(entry) = entry {
         for flag in &entry.required_flags {

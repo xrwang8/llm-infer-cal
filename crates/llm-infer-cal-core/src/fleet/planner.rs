@@ -12,6 +12,9 @@ pub struct FleetOption {
     pub tensor_parallel_size: u64,
     pub pipeline_parallel_size: u64,
     pub node_count: u64,
+    pub main_weight_bytes_per_gpu: u64,
+    pub speculative_weight_bytes_per_gpu: u64,
+    pub cpu_offload_bytes_per_gpu: u64,
     pub weight_bytes_per_gpu: u64,
     pub kv_bytes_per_request: u64,
     pub kv_bytes_per_request_per_gpu: u64,
@@ -27,6 +30,13 @@ pub struct FleetOption {
     pub fits: bool,
     pub reason_en: String,
     pub reason_zh: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FleetMemoryOptions {
+    pub target_concurrent_requests: Option<u64>,
+    pub speculative_weight_bytes: u64,
+    pub cpu_offload_bytes_per_gpu: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +69,7 @@ struct EvalContext<'a> {
     candidates: &'a [u64],
     kv_by_context: &'a [(u64, u64)],
     activation_by_context: &'a [(u64, u64)],
+    memory_options: FleetMemoryOptions,
 }
 
 pub fn plan(
@@ -94,6 +105,32 @@ pub fn plan_with_activation(
     kv_bytes_by_context: &[(u64, u64)],
     activation_bytes_by_context: &[(u64, u64)],
 ) -> FleetRecommendation {
+    plan_with_memory_options(
+        profile,
+        weight_bytes,
+        kv_bytes_per_request_at_ref,
+        activation_bytes_per_request_at_ref,
+        reference_context_tokens,
+        gpu,
+        forced_gpu_count,
+        kv_bytes_by_context,
+        activation_bytes_by_context,
+        FleetMemoryOptions::default(),
+    )
+}
+
+pub fn plan_with_memory_options(
+    profile: &ArchitectureProfile,
+    weight_bytes: u64,
+    kv_bytes_per_request_at_ref: u64,
+    activation_bytes_per_request_at_ref: u64,
+    reference_context_tokens: u64,
+    gpu: &GPUSpec,
+    forced_gpu_count: Option<u64>,
+    kv_bytes_by_context: &[(u64, u64)],
+    activation_bytes_by_context: &[(u64, u64)],
+    memory_options: FleetMemoryOptions,
+) -> FleetRecommendation {
     let total_memory_per_gpu = (gpu.memory_gb as f64 * 1_000_000_000.0) as u64;
     let usable_per_gpu =
         (gpu.memory_gb as f64 * 1_000_000_000.0 * (1.0 - OVERHEAD_FRACTION)) as u64;
@@ -113,11 +150,17 @@ pub fn plan_with_activation(
         candidates: &candidates,
         kv_by_context: kv_bytes_by_context,
         activation_by_context: activation_bytes_by_context,
+        memory_options,
     };
 
     if let Some(forced_gpu_count) = forced_gpu_count {
-        let option = evaluate_count(forced_gpu_count, "dev", &eval);
-        let best_tier = option.fits.then_some("dev");
+        let tier = if memory_options.target_concurrent_requests.is_some() {
+            "target"
+        } else {
+            "dev"
+        };
+        let option = evaluate_count(forced_gpu_count, tier, &eval);
+        let best_tier = option.fits.then_some(tier);
         return FleetRecommendation {
             options: vec![option],
             best_tier,
@@ -127,7 +170,16 @@ pub fn plan_with_activation(
         };
     }
 
-    let tiers = [("min", 1_u64), ("dev", 8), ("prod", 16)];
+    let default_tiers = [("min", 1_u64), ("dev", 8), ("prod", 16)];
+    let target_tiers = [(
+        "target",
+        memory_options.target_concurrent_requests.unwrap_or(0),
+    )];
+    let tiers: &[(&str, u64)] = if memory_options.target_concurrent_requests.is_some() {
+        &target_tiers
+    } else {
+        &default_tiers
+    };
     let mut options = Vec::new();
     for (tier, concurrent) in tiers {
         let gpu_count = smallest_fitting_count(
@@ -137,13 +189,19 @@ pub fn plan_with_activation(
             kv_bytes_per_request_at_ref,
             activation_bytes_per_request_at_ref,
             usable_per_gpu,
-            concurrent,
+            *concurrent,
+            memory_options,
         );
         let chosen = gpu_count.unwrap_or_else(|| *candidates.iter().max().unwrap_or(&1));
         options.push(evaluate_count(chosen, tier, &eval));
     }
 
-    let best_tier = ["dev", "min", "prod"].iter().find_map(|tier| {
+    let order: &[&str] = if memory_options.target_concurrent_requests.is_some() {
+        &["target"]
+    } else {
+        &["dev", "min", "prod"]
+    };
+    let best_tier = order.iter().find_map(|tier| {
         options
             .iter()
             .find(|option| option.tier == *tier && option.fits)
@@ -227,6 +285,7 @@ fn smallest_fitting_count(
     activation_bytes: u64,
     usable_per_gpu: u64,
     concurrent: u64,
+    memory_options: FleetMemoryOptions,
 ) -> Option<u64> {
     candidates.iter().copied().find(|count| {
         fits(
@@ -237,6 +296,7 @@ fn smallest_fitting_count(
             activation_bytes,
             usable_per_gpu,
             concurrent,
+            memory_options,
         )
     })
 }
@@ -249,8 +309,9 @@ fn fits(
     activation_bytes: u64,
     usable_per_gpu: u64,
     concurrent: u64,
+    memory_options: FleetMemoryOptions,
 ) -> bool {
-    let weight_per_gpu = ceil_div(weight_bytes, gpu_count);
+    let weight_per_gpu = resident_weight_per_gpu(weight_bytes, gpu_count, memory_options).total;
     let shards = effective_kv_shards(profile, gpu_count);
     let kv_per_gpu = ceil_div(kv_bytes, shards);
     let activation_per_gpu = ceil_div(activation_bytes, gpu_count.max(1));
@@ -261,12 +322,12 @@ fn fits(
 fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) -> FleetOption {
     let (tensor_parallel_size, pipeline_parallel_size, node_count) =
         layout_for_count(eval.profile, gpu_count);
-    let weight_per_gpu = ceil_div(eval.weight_bytes, gpu_count);
+    let weight = resident_weight_per_gpu(eval.weight_bytes, gpu_count, eval.memory_options);
     let shards = effective_kv_shards(eval.profile, gpu_count);
     let kv_per_gpu = ceil_div(eval.kv_bytes, shards);
     let activation_per_gpu = ceil_div(eval.activation_bytes, gpu_count.max(1));
     let per_request_per_gpu = kv_per_gpu + activation_per_gpu;
-    let headroom = eval.usable_per_gpu.saturating_sub(weight_per_gpu);
+    let headroom = eval.usable_per_gpu.saturating_sub(weight.total);
     let max_concurrent = headroom.checked_div(per_request_per_gpu).unwrap_or(0);
     let mut max_concurrent_by_context = eval
         .kv_by_context
@@ -293,12 +354,13 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
 
     let tier_concurrent = match tier {
         "min" => 1,
+        "target" => eval.memory_options.target_concurrent_requests.unwrap_or(1),
         "dev" => 8,
         "prod" => 16,
         _ => 8,
     };
     let required_bytes_per_gpu_at_tier =
-        weight_per_gpu + tier_concurrent * (kv_per_gpu + activation_per_gpu);
+        weight.total + tier_concurrent * (kv_per_gpu + activation_per_gpu);
     let fits = fits(
         gpu_count,
         eval.profile,
@@ -307,6 +369,7 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         eval.activation_bytes,
         eval.usable_per_gpu,
         tier_concurrent,
+        eval.memory_options,
     );
 
     let layout_en = if pipeline_parallel_size > 1 {
@@ -361,7 +424,10 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         tensor_parallel_size,
         pipeline_parallel_size,
         node_count,
-        weight_bytes_per_gpu: weight_per_gpu,
+        main_weight_bytes_per_gpu: weight.main,
+        speculative_weight_bytes_per_gpu: weight.speculative,
+        cpu_offload_bytes_per_gpu: weight.cpu_offload,
+        weight_bytes_per_gpu: weight.total,
         kv_bytes_per_request: eval.kv_bytes,
         kv_bytes_per_request_per_gpu: kv_per_gpu,
         activation_bytes_per_request: eval.activation_bytes,
@@ -378,6 +444,30 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         fits,
         reason_en,
         reason_zh,
+    }
+}
+
+struct ResidentWeight {
+    main: u64,
+    speculative: u64,
+    cpu_offload: u64,
+    total: u64,
+}
+
+fn resident_weight_per_gpu(
+    weight_bytes: u64,
+    gpu_count: u64,
+    memory_options: FleetMemoryOptions,
+) -> ResidentWeight {
+    let base_main = ceil_div(weight_bytes, gpu_count.max(1));
+    let cpu_offload = memory_options.cpu_offload_bytes_per_gpu.min(base_main);
+    let main = base_main.saturating_sub(cpu_offload);
+    let speculative = ceil_div(memory_options.speculative_weight_bytes, gpu_count.max(1));
+    ResidentWeight {
+        main,
+        speculative,
+        cpu_offload,
+        total: main + speculative,
     }
 }
 

@@ -106,8 +106,16 @@ describe('report helpers', () => {
   it('hides explain and refresh from advanced settings', () => {
     const settings = advancedSettings();
 
-    expect(settings.map((setting) => setting.label)).toEqual(['强制 GPU 数', 'LLM 审计（--llm-review）']);
-    expect(settings.map((setting) => setting.key)).toEqual(['gpu_count', 'llm_review']);
+    expect(settings.map((setting) => setting.label)).toEqual([
+      '强制 GPU 数',
+      '目标并发',
+      'LLM 审计（--llm-review）',
+    ]);
+    expect(settings.map((setting) => setting.key)).toEqual([
+      'gpu_count',
+      'target_concurrent_requests',
+      'llm_review',
+    ]);
     expect(settings.every((setting) => setting.collapsedByDefault)).toBe(true);
   });
 
@@ -137,6 +145,10 @@ describe('report helpers', () => {
         concurrency_degradation: '1.67',
         kv_cache_bits: '8',
         paged_attention: true,
+        target_concurrent_requests: '3',
+        speculative_draft_model_id: ' Qwen/Qwen2.5-1.5B-Instruct ',
+        speculative_extra_weight_gb: '0.5',
+        cpu_offload_gb: '1',
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
@@ -147,6 +159,10 @@ describe('report helpers', () => {
       concurrency_degradation: 1.67,
       kv_cache_bits: 8,
       paged_attention: true,
+      target_concurrent_requests: 3,
+      speculative_draft_model_id: 'Qwen/Qwen2.5-1.5B-Instruct',
+      speculative_extra_weight_gb: 0.5,
+      cpu_offload_gb: 1,
       explain: true,
       llm_review: false,
     });
@@ -167,6 +183,10 @@ describe('report helpers', () => {
         concurrency_degradation: '1.67',
         kv_cache_bits: '16',
         paged_attention: false,
+        target_concurrent_requests: '',
+        speculative_draft_model_id: '',
+        speculative_extra_weight_gb: '',
+        cpu_offload_gb: '',
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
@@ -193,6 +213,10 @@ describe('report helpers', () => {
         concurrency_degradation: '1',
         kv_cache_bits: '16',
         paged_attention: true,
+        target_concurrent_requests: '',
+        speculative_draft_model_id: '',
+        speculative_extra_weight_gb: '',
+        cpu_offload_gb: '',
         llm_review: true,
         llm_review_api_key: ' sk-test ',
         llm_review_base_url: ' https://api.deepseek.com/v1/ ',
@@ -224,6 +248,10 @@ describe('report helpers', () => {
         concurrency_degradation: '1',
         kv_cache_bits: '16',
         paged_attention: true,
+        target_concurrent_requests: '',
+        speculative_draft_model_id: '',
+        speculative_extra_weight_gb: '',
+        cpu_offload_gb: '',
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',

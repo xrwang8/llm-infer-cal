@@ -59,6 +59,10 @@ const DEFAULT_FORM: EvaluateForm = {
   concurrency_degradation: '1',
   kv_cache_bits: '16',
   paged_attention: true,
+  target_concurrent_requests: '',
+  speculative_draft_model_id: '',
+  speculative_extra_weight_gb: '',
+  cpu_offload_gb: '',
   llm_review: false,
   llm_review_api_key: '',
   llm_review_base_url: '',
@@ -433,6 +437,22 @@ export function App() {
                     checked={form.paged_attention}
                     onChange={(value) => updateField('paged_attention', value)}
                   />
+                  <TextField
+                    label="Draft/EAGLE 模型 ID"
+                    value={form.speculative_draft_model_id}
+                    placeholder="可选：独立 draft model"
+                    onChange={(value) => updateField('speculative_draft_model_id', value)}
+                  />
+                  <NumberField
+                    label="Speculative 额外权重 GiB"
+                    value={form.speculative_extra_weight_gb}
+                    onChange={(value) => updateField('speculative_extra_weight_gb', value)}
+                  />
+                  <NumberField
+                    label="CPU Offload / GPU GiB"
+                    value={form.cpu_offload_gb}
+                    onChange={(value) => updateField('cpu_offload_gb', value)}
+                  />
                 </div>
                 {form.llm_review
                   ? reviewerSettings.map((setting) => (
@@ -785,6 +805,9 @@ function MemoryBreakdown({ option, hardware }: { option?: FleetOption; hardware?
   const memoryBytes = (hardware?.memory_gb ?? 0) * 1_000_000_000;
   const concurrent = option?.tier_concurrent_requests ?? 1;
   const weight = option?.weight_bytes_per_gpu ?? 0;
+  const mainWeight = option?.main_weight_bytes_per_gpu ?? Math.max(weight - (option?.speculative_weight_bytes_per_gpu ?? 0), 0);
+  const speculativeWeight = option?.speculative_weight_bytes_per_gpu ?? 0;
+  const cpuOffload = option?.cpu_offload_bytes_per_gpu ?? 0;
   const kv = (option?.kv_bytes_per_request_per_gpu ?? option?.kv_bytes_per_request ?? 0) * concurrent;
   const activation = (option?.activation_bytes_per_request_per_gpu ?? 0) * concurrent;
   const reserved = option?.reserved_bytes_per_gpu ?? Math.max(memoryBytes - (option?.usable_bytes_per_gpu ?? 0), 0);
@@ -796,7 +819,9 @@ function MemoryBreakdown({ option, hardware }: { option?: FleetOption; hardware?
         <span>Required / GPU</span>
         <strong>{formatBytes(required)}</strong>
       </div>
-      <Bar label="Weights / GPU" value={weight} total={memoryBytes} tone="weight" />
+      <Bar label="Main Weights / GPU" value={mainWeight} total={memoryBytes} tone="weight" />
+      {speculativeWeight > 0 ? <Bar label="Draft / Speculative Weights" value={speculativeWeight} total={memoryBytes} tone="speculative" /> : null}
+      {cpuOffload > 0 ? <Bar label="CPU Offload Saved / GPU" value={cpuOffload} total={memoryBytes} tone="offload" /> : null}
       <Bar label={`KV Cache × ${concurrent}`} value={kv} total={memoryBytes} tone="kv" />
       <Bar label={`Activations × ${concurrent}`} value={activation} total={memoryBytes} tone="activation" />
       <Bar label="Reserved / Framework" value={reserved} total={memoryBytes} tone="reserved" />
@@ -915,6 +940,9 @@ function FormulaReference({ report, form, activeParams }: { report: Report | nul
   const isMoe = !!params && !!activeParams && activeParams < params;
   const kvBits = report?.inference_options?.kv_cache_bits ?? Number(form.kv_cache_bits || 16);
   const paged = report?.inference_options?.paged_attention ?? form.paged_attention;
+  const speculativeWeight = annotatedValue<number>(report?.inference_options?.speculative_extra_weight_bytes);
+  const cpuOffload = report?.inference_options?.cpu_offload_bytes_per_gpu ?? 0;
+  const targetConcurrency = report?.inference_options?.target_concurrent_requests ?? Number(form.target_concurrent_requests || 0);
 
   return (
     <div className="formulaList">
@@ -923,6 +951,8 @@ function FormulaReference({ report, form, activeParams }: { report: Report | nul
         <pre>
 {`weights = safetensors_total_bytes
 ${weight ? `observed = ${formatBytes(weight)}` : 'observed = waiting for report'}
+${speculativeWeight ? `draft/speculative extra = ${formatBytes(speculativeWeight)}` : 'draft/speculative extra = 0'}
+${cpuOffload ? `cpu_offload_per_gpu = ${formatBytes(cpuOffload)} saved from GPU resident weights` : 'cpu_offload_per_gpu = 0'}
 ${isMoe ? 'MoE: all expert weights stay resident in VRAM.' : 'Dense: all weights participate in memory and compute.'}`}
         </pre>
       </details>
@@ -939,6 +969,7 @@ ${kv?.bytes?.value ? `selected = ${formatBytes(kv.bytes.value)}` : 'selected = w
         <pre>
 {`activation ~= seq_len * hidden_size * 2B
 ${isMoe ? 'MoE routing factor is included.' : 'Dense activation estimate.'}
+${targetConcurrency ? `target concurrency = ${formatNumber(targetConcurrency)} requests` : 'target concurrency = default tier'}
 ${activation?.bytes?.value ? `selected = ${formatBytes(activation.bytes.value)}` : 'selected = waiting for report'}`}
         </pre>
       </details>

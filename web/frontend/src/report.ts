@@ -5,6 +5,9 @@ export type FleetOption = {
   node_count?: number;
   tensor_parallel_size?: number;
   pipeline_parallel_size?: number;
+  main_weight_bytes_per_gpu?: number;
+  speculative_weight_bytes_per_gpu?: number;
+  cpu_offload_bytes_per_gpu?: number;
   weight_bytes_per_gpu?: number;
   usable_bytes_per_gpu?: number;
   kv_bytes_per_request?: number;
@@ -78,6 +81,10 @@ export type Report = {
   inference_options?: {
     kv_cache_bits?: number;
     paged_attention?: boolean;
+    target_concurrent_requests?: number | null;
+    speculative_draft_model_id?: string | null;
+    speculative_extra_weight_bytes?: Annotated<number>;
+    cpu_offload_bytes_per_gpu?: number;
   };
   engine_compatibility?: Record<string, any> | null;
   hardware?: GpuSummary | null;
@@ -115,6 +122,10 @@ export type EvaluateForm = {
   concurrency_degradation: string;
   kv_cache_bits: string;
   paged_attention: boolean;
+  target_concurrent_requests: string;
+  speculative_draft_model_id: string;
+  speculative_extra_weight_gb: string;
+  cpu_offload_gb: string;
   llm_review: boolean;
   llm_review_api_key: string;
   llm_review_base_url: string;
@@ -134,7 +145,7 @@ type PerformanceSettingKey =
   | 'decode_bw_utilization'
   | 'concurrency_degradation';
 
-type AdvancedNumberSettingKey = 'gpu_count';
+type AdvancedNumberSettingKey = 'gpu_count' | 'target_concurrent_requests';
 type AdvancedBooleanSettingKey = 'llm_review';
 type LlmReviewSettingKey = 'llm_review_api_key' | 'llm_review_base_url' | 'llm_review_model';
 
@@ -196,6 +207,7 @@ const PERFORMANCE_SETTINGS: PerformanceSetting[] = [
 
 const ADVANCED_SETTINGS: AdvancedSetting[] = [
   { key: 'gpu_count', label: '强制 GPU 数', control: 'number', collapsedByDefault: true },
+  { key: 'target_concurrent_requests', label: '目标并发', control: 'number', collapsedByDefault: true },
   { key: 'llm_review', label: 'LLM 审计（--llm-review）', control: 'checkbox', collapsedByDefault: true },
 ];
 
@@ -386,16 +398,16 @@ export function labelText(label: string | null | undefined): string {
 }
 
 export function buildEvaluatePayload(form: EvaluateForm) {
-  const numberOrUndefined = (value: string) => {
-    const trimmed = value.trim();
+  const numberOrUndefined = (value?: string) => {
+    const trimmed = value?.trim() ?? '';
     if (!trimmed) {
       return undefined;
     }
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) ? parsed : undefined;
   };
-  const stringOrUndefined = (value: string) => {
-    const trimmed = value.trim();
+  const stringOrUndefined = (value?: string) => {
+    const trimmed = value?.trim() ?? '';
     return trimmed || undefined;
   };
 
@@ -415,6 +427,10 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     concurrency_degradation: numberOrUndefined(form.concurrency_degradation),
     kv_cache_bits: numberOrUndefined(form.kv_cache_bits),
     paged_attention: form.paged_attention,
+    target_concurrent_requests: numberOrUndefined(form.target_concurrent_requests),
+    speculative_draft_model_id: stringOrUndefined(form.speculative_draft_model_id),
+    speculative_extra_weight_gb: numberOrUndefined(form.speculative_extra_weight_gb),
+    cpu_offload_gb: numberOrUndefined(form.cpu_offload_gb),
     explain: true,
     llm_review: form.llm_review,
     llm_review_api_key: form.llm_review ? stringOrUndefined(form.llm_review_api_key) : undefined,

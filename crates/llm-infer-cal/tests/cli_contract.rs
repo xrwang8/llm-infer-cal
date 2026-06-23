@@ -21,6 +21,10 @@ const USAGE_OPTIONS: &[&str] = &[
     "--concurrency-degradation",
     "--kv-cache-bits",
     "--paged-attention",
+    "--target-concurrency",
+    "--speculative-draft-model",
+    "--speculative-extra-weight-gb",
+    "--cpu-offload-gb",
     "--explain",
     "--llm-review",
     "--source",
@@ -143,6 +147,12 @@ fn all_runtime_flags_parse_before_source_validation() {
         "--kv-cache-bits",
         "8",
         "--paged-attention",
+        "--target-concurrency",
+        "3",
+        "--speculative-extra-weight-gb",
+        "0.5",
+        "--cpu-offload-gb",
+        "1",
         "--explain",
         "--llm-review",
         "--source",
@@ -299,6 +309,12 @@ fn builtin_qwen36_json_includes_inference_optimization_options() {
         "--kv-cache-bits",
         "8",
         "--paged-attention",
+        "--target-concurrency",
+        "3",
+        "--speculative-extra-weight-gb",
+        "0.5",
+        "--cpu-offload-gb",
+        "1",
         "--json",
     ]);
 
@@ -308,6 +324,17 @@ fn builtin_qwen36_json_includes_inference_optimization_options() {
         serde_json::from_str(&exit.stdout).expect("stdout should be valid JSON");
     assert_eq!(json["inference_options"]["kv_cache_bits"], 8);
     assert_eq!(json["inference_options"]["paged_attention"], true);
+    assert_eq!(json["inference_options"]["target_concurrent_requests"], 3);
+    assert_eq!(
+        json["inference_options"]["cpu_offload_bytes_per_gpu"],
+        1_073_741_824
+    );
+    assert_eq!(
+        json["inference_options"]["speculative_extra_weight_bytes"]["value"],
+        536_870_912
+    );
+    assert_eq!(json["fleet"]["best_tier"], "target");
+    assert_eq!(json["fleet"]["options"][0]["tier_concurrent_requests"], 3);
     assert!(json["kv_cache_by_context"][0]["bytes"]["source"]
         .as_str()
         .unwrap()

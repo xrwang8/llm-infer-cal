@@ -60,6 +60,14 @@ Options:
           KV cache precision in bits per element [default: 16]
       --paged-attention
           Apply paged-attention KV memory factor (0.75)
+      --target-concurrency <TARGET_CONCURRENCY>
+          Target concurrent requests for VRAM pressure planning
+      --speculative-draft-model <SPECULATIVE_DRAFT_MODEL>
+          Separate draft/EAGLE model id; its safetensors size is added to resident VRAM
+      --speculative-extra-weight-gb <SPECULATIVE_EXTRA_WEIGHT_GB>
+          Additional speculative decoding resident weight in GiB [default: 0]
+      --cpu-offload-gb <CPU_OFFLOAD_GB>
+          Per-GPU CPU/offload budget in GiB, subtracted from GPU-resident weights [default: 0]
       --explain
           Print the full derivation trace
       --llm-review
@@ -96,6 +104,10 @@ const COMPLETION_OPTIONS: &[&str] = &[
     "--concurrency-degradation",
     "--kv-cache-bits",
     "--paged-attention",
+    "--target-concurrency",
+    "--speculative-draft-model",
+    "--speculative-extra-weight-gb",
+    "--cpu-offload-gb",
     "--explain",
     "--llm-review",
     "--source",
@@ -191,6 +203,22 @@ struct Cli {
     #[arg(long = "paged-attention")]
     paged_attention: bool,
 
+    /// Target concurrent requests for VRAM pressure planning.
+    #[arg(long = "target-concurrency")]
+    target_concurrency: Option<u64>,
+
+    /// Separate draft/EAGLE model id; its safetensors size is added to resident VRAM.
+    #[arg(long = "speculative-draft-model")]
+    speculative_draft_model: Option<String>,
+
+    /// Additional speculative decoding resident weight in GiB.
+    #[arg(long = "speculative-extra-weight-gb", default_value_t = 0.0)]
+    speculative_extra_weight_gb: f64,
+
+    /// Per-GPU CPU/offload budget in GiB, subtracted from GPU-resident weights.
+    #[arg(long = "cpu-offload-gb", default_value_t = 0.0)]
+    cpu_offload_gb: f64,
+
     /// Print the full derivation trace.
     #[arg(long)]
     explain: bool,
@@ -260,6 +288,18 @@ where
     if cli.kv_cache_bits == 0 {
         return CliExit::err(1, "--kv-cache-bits must be greater than 0.\n");
     }
+    if matches!(cli.target_concurrency, Some(0)) {
+        return CliExit::err(1, "--target-concurrency must be greater than 0.\n");
+    }
+    if !cli.speculative_extra_weight_gb.is_finite() || cli.speculative_extra_weight_gb < 0.0 {
+        return CliExit::err(
+            1,
+            "--speculative-extra-weight-gb must be greater than or equal to 0.\n",
+        );
+    }
+    if !cli.cpu_offload_gb.is_finite() || cli.cpu_offload_gb < 0.0 {
+        return CliExit::err(1, "--cpu-offload-gb must be greater than or equal to 0.\n");
+    }
 
     if cli.list_gpus {
         return match load_database() {
@@ -308,6 +348,15 @@ where
         concurrency_degradation: cli.concurrency_degradation,
         kv_cache_bits: cli.kv_cache_bits,
         paged_attention: cli.paged_attention,
+        target_concurrent_requests: cli.target_concurrency,
+        speculative_draft_model_id: cli
+            .speculative_draft_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        speculative_extra_weight_bytes: gib_to_bytes(cli.speculative_extra_weight_gb),
+        cpu_offload_bytes_per_gpu: gib_to_bytes(cli.cpu_offload_gb),
     };
 
     let report = match evaluator.evaluate(model_id, gpu, &cli.engine, options) {
@@ -467,6 +516,10 @@ fn with_newline(mut value: String) -> String {
         value.push('\n');
     }
     value
+}
+
+fn gib_to_bytes(value: f64) -> u64 {
+    (value * 1024.0 * 1024.0 * 1024.0).round() as u64
 }
 
 fn handle_completion_args(args: &[OsString]) -> Option<CliExit> {

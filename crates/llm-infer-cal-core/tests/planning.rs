@@ -1,7 +1,9 @@
 use llm_infer_cal_core::architecture::profile::{
     ArchitectureProfile, AttentionTraits, AttentionVariant, Confidence, Family, MoeTraits,
 };
-use llm_infer_cal_core::fleet::planner::{kv_shards, plan, plan_with_activation};
+use llm_infer_cal_core::fleet::planner::{
+    kv_shards, plan, plan_with_activation, plan_with_memory_options, FleetMemoryOptions,
+};
 use llm_infer_cal_core::hardware::loader::{lookup, GPUSpec};
 use llm_infer_cal_core::output::labels::{AnnotatedValue, Label};
 use llm_infer_cal_core::performance::compute::{
@@ -276,6 +278,42 @@ fn fleet_planner_counts_activation_memory_in_required_bytes() {
         10_000_000_000 + 8 * (10_000_000_000 + 5_000_000_000)
     );
     assert!(activated.required_bytes_per_gpu_at_tier > plain.required_bytes_per_gpu_at_tier);
+}
+
+#[test]
+fn fleet_planner_applies_target_concurrency_speculative_weights_and_cpu_offload() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_memory_options(
+        &llama_profile(),
+        50_000_000_000,
+        5_000_000_000,
+        1_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 5_000_000_000)],
+        &[(131_072, 1_000_000_000)],
+        FleetMemoryOptions {
+            target_concurrent_requests: Some(3),
+            speculative_weight_bytes: 2_000_000_000,
+            cpu_offload_bytes_per_gpu: 4_000_000_000,
+        },
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.tier, "target");
+    assert_eq!(option.tier_concurrent_requests, 3);
+    assert_eq!(option.main_weight_bytes_per_gpu, 46_000_000_000);
+    assert_eq!(option.cpu_offload_bytes_per_gpu, 4_000_000_000);
+    assert_eq!(option.speculative_weight_bytes_per_gpu, 2_000_000_000);
+    assert_eq!(option.weight_bytes_per_gpu, 48_000_000_000);
+    assert_eq!(
+        option.required_bytes_per_gpu_at_tier,
+        48_000_000_000 + 3 * (5_000_000_000 + 1_000_000_000)
+    );
+    assert_eq!(option.max_concurrent_at_reference_ctx, 4);
+    assert!(option.fits);
+    assert_eq!(rec.best_tier, Some("target"));
 }
 
 #[test]

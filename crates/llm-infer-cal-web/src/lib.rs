@@ -152,6 +152,21 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
             "kv_cache_bits must be greater than 0",
         ));
     }
+    if matches!(req.target_concurrent_requests, Some(0)) {
+        return Err(ApiError::bad_request(
+            "target_concurrent_requests must be greater than 0",
+        ));
+    }
+    let speculative_extra_weight_bytes = memory_bytes_from_request(
+        req.speculative_extra_weight_bytes,
+        req.speculative_extra_weight_gb,
+        "speculative_extra_weight_gb",
+    )?;
+    let cpu_offload_bytes_per_gpu = memory_bytes_from_request(
+        req.cpu_offload_bytes_per_gpu,
+        req.cpu_offload_gb,
+        "cpu_offload_gb",
+    )?;
 
     let source_name = req.source.as_deref().unwrap_or("builtin");
     let source = source_from_name(source_name, timeout_s).map_err(ApiError::bad_request)?;
@@ -175,13 +190,22 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
             .unwrap_or(defaults.concurrency_degradation),
         kv_cache_bits: req.kv_cache_bits.unwrap_or(defaults.kv_cache_bits),
         paged_attention: req.paged_attention.unwrap_or(defaults.paged_attention),
+        target_concurrent_requests: req.target_concurrent_requests,
+        speculative_draft_model_id: req
+            .speculative_draft_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        speculative_extra_weight_bytes,
+        cpu_offload_bytes_per_gpu,
     };
 
     let reports = gpu_ids
         .iter()
         .map(|gpu| {
             evaluator
-                .evaluate(req.model_id.trim(), gpu, req.engine.trim(), options)
+                .evaluate(req.model_id.trim(), gpu, req.engine.trim(), options.clone())
                 .map_err(ApiError::from_source_error)
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -218,6 +242,24 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
     }
 
     Ok(Json(value))
+}
+
+fn memory_bytes_from_request(
+    explicit_bytes: Option<u64>,
+    gib: Option<f64>,
+    field_name: &str,
+) -> Result<u64, ApiError> {
+    if let Some(value) = gib {
+        if !value.is_finite() || value < 0.0 {
+            return Err(ApiError::bad_request(format!(
+                "{field_name} must be greater than or equal to 0"
+            )));
+        }
+    }
+    Ok(explicit_bytes.unwrap_or_else(|| {
+        gib.map(|value| (value * 1024.0 * 1024.0 * 1024.0).round() as u64)
+            .unwrap_or(0)
+    }))
 }
 
 fn requested_gpus(req: &EvaluateRequest) -> Result<Vec<String>, ApiError> {
@@ -288,6 +330,12 @@ struct EvaluateRequest {
     concurrency_degradation: Option<f64>,
     kv_cache_bits: Option<u64>,
     paged_attention: Option<bool>,
+    target_concurrent_requests: Option<u64>,
+    speculative_draft_model_id: Option<String>,
+    speculative_extra_weight_bytes: Option<u64>,
+    speculative_extra_weight_gb: Option<f64>,
+    cpu_offload_bytes_per_gpu: Option<u64>,
+    cpu_offload_gb: Option<f64>,
     explain: Option<bool>,
     llm_review: Option<bool>,
     llm_review_api_key: Option<String>,
@@ -464,6 +512,12 @@ mod tests {
             concurrency_degradation: None,
             kv_cache_bits: None,
             paged_attention: None,
+            target_concurrent_requests: None,
+            speculative_draft_model_id: None,
+            speculative_extra_weight_bytes: None,
+            speculative_extra_weight_gb: None,
+            cpu_offload_bytes_per_gpu: None,
+            cpu_offload_gb: None,
             explain: None,
             llm_review: Some(true),
             llm_review_api_key: api_key.map(ToOwned::to_owned),
