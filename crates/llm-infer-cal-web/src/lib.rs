@@ -12,7 +12,7 @@ use llm_infer_cal_core::{
         explain::build as build_explain,
     },
     hardware::loader::load_database,
-    llm_review::reviewer::run_review,
+    llm_review::reviewer::{run_review_with_env, EnvConfig},
     model_source::{
         base::{ModelSource, ModelSourceError},
         builtin::BuiltinSource,
@@ -189,7 +189,8 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
             value["explain_text"] = Value::String(render_explain_text(&explain_entries));
         }
         if req.llm_review.unwrap_or(false) {
-            let review = run_review(&explain_entries, lang);
+            let review =
+                run_review_with_env(&explain_entries, lang, reviewer_env_from_request(&req));
             value["llm_review_text"] = Value::String(render_llm_review_text(&review));
         }
     }
@@ -236,6 +237,9 @@ struct EvaluateRequest {
     concurrency_degradation: Option<f64>,
     explain: Option<bool>,
     llm_review: Option<bool>,
+    llm_review_api_key: Option<String>,
+    llm_review_base_url: Option<String>,
+    llm_review_model: Option<String>,
     timeout_s: Option<f64>,
     lang: Option<String>,
 }
@@ -246,6 +250,26 @@ fn default_gpu() -> String {
 
 fn default_engine() -> String {
     "vllm".to_string()
+}
+
+fn reviewer_env_from_request(req: &EvaluateRequest) -> EnvConfig {
+    reviewer_env_from_request_with_base(req, EnvConfig::from_process_env())
+}
+
+fn reviewer_env_from_request_with_base(req: &EvaluateRequest, base: EnvConfig) -> EnvConfig {
+    EnvConfig {
+        api_key: request_nonempty(&req.llm_review_api_key).or(base.api_key),
+        base_url: request_nonempty(&req.llm_review_base_url).or(base.base_url),
+        model: request_nonempty(&req.llm_review_model).or(base.model),
+    }
+}
+
+fn request_nonempty(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -311,5 +335,86 @@ impl IntoResponse for ApiError {
             })),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reviewer_env_uses_request_scoped_llm_config() {
+        let req = request_with_review_config(
+            Some(" sk-test "),
+            Some(" https://api.deepseek.com/v1/ "),
+            Some(" deepseek-chat "),
+        );
+
+        let env = reviewer_env_from_request_with_base(&req, EnvConfig::default());
+
+        assert_eq!(env.api_key.as_deref(), Some("sk-test"));
+        assert_eq!(
+            env.base_url.as_deref(),
+            Some("https://api.deepseek.com/v1/")
+        );
+        assert_eq!(env.model.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[test]
+    fn reviewer_env_ignores_blank_request_scoped_llm_config() {
+        let req = request_with_review_config(Some(" "), None, Some("\t"));
+
+        let env = reviewer_env_from_request_with_base(&req, EnvConfig::default());
+
+        assert_eq!(env.api_key, None);
+        assert_eq!(env.base_url, None);
+        assert_eq!(env.model, None);
+    }
+
+    #[test]
+    fn reviewer_env_falls_back_to_base_config() {
+        let req = request_with_review_config(None, None, None);
+
+        let env = reviewer_env_from_request_with_base(
+            &req,
+            EnvConfig {
+                api_key: Some("sk-env".to_string()),
+                base_url: Some("https://api.openai.com/v1".to_string()),
+                model: Some("gpt-4o".to_string()),
+            },
+        );
+
+        assert_eq!(env.api_key.as_deref(), Some("sk-env"));
+        assert_eq!(env.base_url.as_deref(), Some("https://api.openai.com/v1"));
+        assert_eq!(env.model.as_deref(), Some("gpt-4o"));
+    }
+
+    fn request_with_review_config(
+        api_key: Option<&str>,
+        base_url: Option<&str>,
+        model: Option<&str>,
+    ) -> EvaluateRequest {
+        EvaluateRequest {
+            model_id: "Qwen/Qwen3-30B-A3B".to_string(),
+            gpu: "H100".to_string(),
+            engine: "vllm".to_string(),
+            source: Some("builtin".to_string()),
+            gpu_count: None,
+            context_length: None,
+            refresh: None,
+            input_tokens: None,
+            output_tokens: None,
+            target_tokens_per_sec: None,
+            prefill_utilization: None,
+            decode_bw_utilization: None,
+            concurrency_degradation: None,
+            explain: None,
+            llm_review: Some(true),
+            llm_review_api_key: api_key.map(ToOwned::to_owned),
+            llm_review_base_url: base_url.map(ToOwned::to_owned),
+            llm_review_model: model.map(ToOwned::to_owned),
+            timeout_s: None,
+            lang: None,
+        }
     }
 }

@@ -5,18 +5,16 @@ import {
   ChevronDown,
   Clipboard,
   Cpu,
-  Database,
   Gauge,
   Layers,
   Play,
   RefreshCcw,
-  Server,
   Settings2,
   Terminal,
   Zap,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { API_BASE, evaluate, fetchGpus, fetchModels } from './api';
+import { evaluate, fetchGpus, fetchModels } from './api';
 import {
   advancedSettings,
   annotatedValue,
@@ -31,6 +29,7 @@ import {
   gpuVendorOptionLabel,
   itemsForGroup,
   labelText,
+  llmReviewSettings,
   modelVendorOptionLabel,
   performanceSettings,
   pct,
@@ -58,6 +57,9 @@ const DEFAULT_FORM: EvaluateForm = {
   refresh: false,
   explain: false,
   llm_review: false,
+  llm_review_api_key: '',
+  llm_review_base_url: '',
+  llm_review_model: '',
 };
 
 const sourceOptions = [
@@ -78,7 +80,6 @@ export function App() {
   const [models, setModels] = useState<ModelSummary[]>([]);
   const [gpus, setGpus] = useState<GpuSummary[]>([]);
   const [report, setReport] = useState<Report | null>(null);
-  const [loadingMeta, setLoadingMeta] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -95,9 +96,6 @@ export function App() {
       .catch((nextError) => {
         if (!mounted) return;
         setError(nextError instanceof Error ? nextError.message : String(nextError));
-      })
-      .finally(() => {
-        if (mounted) setLoadingMeta(false);
       });
 
     void runEvaluation(DEFAULT_FORM);
@@ -126,6 +124,7 @@ export function App() {
   const engineSupport = report?.engine_compatibility?.support ?? 'unknown';
   const tuningSettings = performanceSettings();
   const advancedControls = advancedSettings();
+  const reviewerSettings = llmReviewSettings();
 
   async function runEvaluation(nextForm = form) {
     setEvaluating(true);
@@ -193,11 +192,6 @@ export function App() {
             <h1>llm-infer-cal</h1>
             <p>LLM 推理硬件计算器</p>
           </div>
-        </div>
-        <div className="statusRail">
-          <StatusPill icon={<Server size={16} />} label="API" value={API_BASE.replace(/^https?:\/\//, '')} />
-          <StatusPill icon={<Database size={16} />} label="模型" value={loadingMeta ? '读取中' : `${models.length}`} />
-          <StatusPill icon={<Cpu size={16} />} label="GPU" value={loadingMeta ? '读取中' : `${gpus.length}`} />
         </div>
       </header>
 
@@ -366,6 +360,18 @@ export function App() {
                     />
                   ),
                 )}
+                {form.llm_review
+                  ? reviewerSettings.map((setting) => (
+                      <TextField
+                        key={setting.key}
+                        label={setting.label}
+                        value={form[setting.key]}
+                        type={setting.type ?? 'text'}
+                        placeholder={setting.placeholder}
+                        onChange={(value) => updateField(setting.key, value)}
+                      />
+                    ))
+                  : null}
               </div>
             </details>
           </div>
@@ -442,16 +448,6 @@ export function App() {
   );
 }
 
-function StatusPill({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="statusPill">
-      {icon}
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <div className="sectionHeader">
@@ -496,6 +492,27 @@ function NumberField({ label, value, onChange }: { label: string; value: string;
     <label className="field">
       <span>{label}</span>
       <input inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  type = 'text',
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  type?: 'password' | 'text';
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

@@ -98,6 +98,9 @@ export type EvaluateForm = {
   refresh: boolean;
   explain: boolean;
   llm_review: boolean;
+  llm_review_api_key: string;
+  llm_review_base_url: string;
+  llm_review_model: string;
 };
 
 export type Group<T> = {
@@ -115,6 +118,7 @@ type PerformanceSettingKey =
 
 type AdvancedNumberSettingKey = 'gpu_count';
 type AdvancedBooleanSettingKey = 'refresh' | 'explain' | 'llm_review';
+type LlmReviewSettingKey = 'llm_review_api_key' | 'llm_review_base_url' | 'llm_review_model';
 
 export type PerformanceSetting = {
   key: PerformanceSettingKey;
@@ -139,6 +143,14 @@ export type AdvancedSetting =
       control: 'checkbox';
       collapsedByDefault: true;
     };
+
+export type LlmReviewSetting = {
+  key: LlmReviewSettingKey;
+  label: string;
+  placeholder: string;
+  type?: 'password' | 'text';
+  visibleWhen: 'llm_review';
+};
 
 const GPU_VENDOR_ORDER = [
   'NVIDIA',
@@ -171,12 +183,38 @@ const ADVANCED_SETTINGS: AdvancedSetting[] = [
   { key: 'llm_review', label: 'LLM 审计（--llm-review）', control: 'checkbox', collapsedByDefault: true },
 ];
 
+const LLM_REVIEW_SETTINGS: LlmReviewSetting[] = [
+  {
+    key: 'llm_review_api_key',
+    label: 'LLM API 密钥',
+    placeholder: 'sk-...',
+    type: 'password',
+    visibleWhen: 'llm_review',
+  },
+  {
+    key: 'llm_review_base_url',
+    label: 'LLM 基地址',
+    placeholder: 'https://api.openai.com/v1',
+    visibleWhen: 'llm_review',
+  },
+  {
+    key: 'llm_review_model',
+    label: 'LLM 模型名',
+    placeholder: 'gpt-4o / deepseek-chat / MiniMax-M2',
+    visibleWhen: 'llm_review',
+  },
+];
+
 export function performanceSettings(): PerformanceSetting[] {
   return PERFORMANCE_SETTINGS;
 }
 
 export function advancedSettings(): AdvancedSetting[] {
   return ADVANCED_SETTINGS;
+}
+
+export function llmReviewSettings(): LlmReviewSetting[] {
+  return LLM_REVIEW_SETTINGS;
 }
 
 export function groupModelsByProvider(models: ModelSummary[]): Group<ModelSummary>[] {
@@ -340,6 +378,10 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) ? parsed : undefined;
   };
+  const stringOrUndefined = (value: string) => {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  };
 
   return {
     model_id: form.model_id.trim(),
@@ -357,6 +399,9 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     refresh: form.refresh,
     explain: form.explain,
     llm_review: form.llm_review,
+    llm_review_api_key: form.llm_review ? stringOrUndefined(form.llm_review_api_key) : undefined,
+    llm_review_base_url: form.llm_review ? stringOrUndefined(form.llm_review_base_url) : undefined,
+    llm_review_model: form.llm_review ? stringOrUndefined(form.llm_review_model) : undefined,
     lang: 'zh',
   };
 }

@@ -10,6 +10,7 @@ import {
   groupModelsByProvider,
   gpuVendorOptionLabel,
   itemsForGroup,
+  llmReviewSettings,
   modelVendorOptionLabel,
   performanceSettings,
 } from './report';
@@ -115,6 +116,14 @@ describe('report helpers', () => {
     expect(settings.every((setting) => setting.collapsedByDefault)).toBe(true);
   });
 
+  it('shows LLM reviewer configuration only as LLM review details', () => {
+    const settings = llmReviewSettings();
+
+    expect(settings.map((setting) => setting.label)).toEqual(['LLM API 密钥', 'LLM 基地址', 'LLM 模型名']);
+    expect(settings.map((setting) => setting.key)).toEqual(['llm_review_api_key', 'llm_review_base_url', 'llm_review_model']);
+    expect(settings.every((setting) => setting.visibleWhen === 'llm_review')).toBe(true);
+  });
+
   it('passes supported advanced settings to the evaluate payload', () => {
     expect(
       buildEvaluatePayload({
@@ -133,6 +142,9 @@ describe('report helpers', () => {
         refresh: true,
         explain: true,
         llm_review: false,
+        llm_review_api_key: '',
+        llm_review_base_url: '',
+        llm_review_model: '',
       }),
     ).toMatchObject({
       gpu_count: 2,
@@ -140,6 +152,36 @@ describe('report helpers', () => {
       refresh: true,
       explain: true,
       llm_review: false,
+    });
+  });
+
+  it('passes trimmed LLM reviewer settings to the evaluate payload', () => {
+    expect(
+      buildEvaluatePayload({
+        model_id: 'Qwen/Qwen3-30B-A3B',
+        source: 'builtin',
+        gpu: 'H100',
+        engine: 'vllm',
+        gpu_count: '',
+        context_length: '',
+        input_tokens: '2000',
+        output_tokens: '512',
+        target_tokens_per_sec: '30',
+        prefill_utilization: '0.4',
+        decode_bw_utilization: '0.5',
+        concurrency_degradation: '1',
+        refresh: false,
+        explain: false,
+        llm_review: true,
+        llm_review_api_key: ' sk-test ',
+        llm_review_base_url: ' https://api.deepseek.com/v1/ ',
+        llm_review_model: ' deepseek-chat ',
+      }),
+    ).toMatchObject({
+      llm_review: true,
+      llm_review_api_key: 'sk-test',
+      llm_review_base_url: 'https://api.deepseek.com/v1/',
+      llm_review_model: 'deepseek-chat',
     });
   });
 });

@@ -76,39 +76,6 @@ button {
   font-size: 13px;
 }
 
-.statusRail {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.statusPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 8px 10px;
-  color: #334139;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid #dce4db;
-  border-radius: 8px;
-}
-
-.statusPill span {
-  color: #66736b;
-  font-size: 12px;
-}
-
-.statusPill strong {
-  max-width: 210px;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .errorBanner {
   display: flex;
   align-items: center;
@@ -689,10 +656,6 @@ th {
   .resultHeader {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .statusRail {
-    justify-content: flex-start;
   }
 
   .twoCol,
