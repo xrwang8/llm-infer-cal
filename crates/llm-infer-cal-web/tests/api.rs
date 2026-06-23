@@ -90,7 +90,53 @@ async fn evaluate_endpoint_returns_report_json() {
     assert_eq!(body["model"]["id"], "Qwen/Qwen3-30B-A3B");
     let lines = body["generated_command"]["lines"].as_array().unwrap();
     assert!(lines.iter().any(|line| line == "--max-model-len 40960"));
-    assert!(lines.iter().any(|line| line == "--max-num-seqs 20"));
+    assert!(lines.iter().any(|line| line == "--max-num-seqs 19"));
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_accepts_inference_optimization_options() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "engine": "vllm",
+        "context_length": 4096,
+        "kv_cache_bits": 8,
+        "paged_attention": true
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    assert_eq!(body["inference_options"]["kv_cache_bits"], 8);
+    assert_eq!(body["inference_options"]["paged_attention"], true);
+    assert!(body["kv_cache_by_context"][0]["bytes"]["source"]
+        .as_str()
+        .unwrap()
+        .contains("paged attention"));
+    assert!(
+        body["activation_by_context"][0]["bytes"]["value"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        body["fleet"]["options"][0]["activation_bytes_per_request"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
 }
 
 #[tokio::test]
@@ -125,7 +171,7 @@ async fn evaluate_endpoint_returns_comparison_for_multiple_gpus() {
 }
 
 #[tokio::test]
-async fn evaluate_endpoint_rejects_more_than_four_comparison_gpus() {
+async fn evaluate_endpoint_returns_comparison_for_five_gpus() {
     let payload = json!({
         "model_id": "Qwen/Qwen3-30B-A3B",
         "source": "builtin",
@@ -146,12 +192,42 @@ async fn evaluate_endpoint_rejects_more_than_four_comparison_gpus() {
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    let reports = body["comparison"]["reports"].as_array().unwrap();
+    assert_eq!(reports.len(), 5);
+    assert_eq!(reports[4]["hardware"]["id"], "L40S");
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_rejects_more_than_sixty_four_comparison_gpus() {
+    let gpus = (0..65).map(|idx| format!("GPU{idx}")).collect::<Vec<_>>();
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "gpus": gpus,
+        "engine": "vllm"
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = json_response(response).await;
     assert!(body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("at most 4"));
+        .contains("at most 64"));
 }
 
 #[tokio::test]

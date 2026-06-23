@@ -135,6 +135,8 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1.67',
+        kv_cache_bits: '8',
+        paged_attention: true,
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
@@ -143,6 +145,8 @@ describe('report helpers', () => {
     ).toMatchObject({
       gpu_count: 2,
       concurrency_degradation: 1.67,
+      kv_cache_bits: 8,
+      paged_attention: true,
       explain: true,
       llm_review: false,
     });
@@ -161,6 +165,8 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1.67',
+        kv_cache_bits: '16',
+        paged_attention: false,
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
@@ -185,6 +191,8 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1',
+        kv_cache_bits: '16',
+        paged_attention: true,
         llm_review: true,
         llm_review_api_key: ' sk-test ',
         llm_review_base_url: ' https://api.deepseek.com/v1/ ',
@@ -198,7 +206,7 @@ describe('report helpers', () => {
     });
   });
 
-  it('passes up to four selected GPUs for comparison while keeping the first GPU for compatibility', () => {
+  it('passes selected GPUs for comparison while keeping the first GPU for compatibility', () => {
     expect(
       buildEvaluatePayload({
         model_id: 'Qwen/Qwen3-30B-A3B',
@@ -214,6 +222,8 @@ describe('report helpers', () => {
         prefill_utilization: '0.4',
         decode_bw_utilization: '0.5',
         concurrency_degradation: '1',
+        kv_cache_bits: '16',
+        paged_attention: true,
         llm_review: false,
         llm_review_api_key: '',
         llm_review_base_url: '',
@@ -221,7 +231,7 @@ describe('report helpers', () => {
       }),
     ).toMatchObject({
       gpu: 'H100',
-      gpus: ['H100', 'A100-80G', 'H800', 'H200'],
+      gpus: ['H100', 'A100-80G', 'H800', 'H200', 'L40S'],
     });
   });
 });

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::architecture::detector::detect;
-use crate::architecture::formulas::kv_cache::compute_kv_cache_bytes;
-use crate::architecture::formulas::weight::estimate_total_params;
+use crate::architecture::formulas::activation::compute_activation_bytes;
+use crate::architecture::formulas::kv_cache::compute_kv_cache_bits;
+use crate::architecture::formulas::weight::{estimate_active_params, estimate_total_params};
 use crate::architecture::profile::ArchitectureProfile;
 use crate::command_generator::sglang::generate_sglang_command;
 use crate::command_generator::vllm::generate_vllm_command;
@@ -10,7 +11,9 @@ use crate::command_generator::Parallelism;
 use crate::core::cache::{ArtifactCache, CacheKey};
 use crate::engine_compat::loader::find_match;
 use crate::engine_compat::EngineCompatEntry;
-use crate::fleet::planner::{effective_kv_shards, plan, FleetOption, FleetRecommendation};
+use crate::fleet::planner::{
+    effective_kv_shards, plan_with_activation, FleetOption, FleetRecommendation,
+};
 use crate::hardware::loader::{lookup, GPUSpec};
 use crate::model_source::base::{ModelArtifact, ModelSource, ModelSourceError};
 use crate::model_source::huggingface::HuggingFaceSource;
@@ -38,6 +41,8 @@ pub struct EvaluationOptions {
     pub prefill_utilization: f64,
     pub decode_bw_utilization: f64,
     pub concurrency_degradation: f64,
+    pub kv_cache_bits: u64,
+    pub paged_attention: bool,
 }
 
 impl Default for EvaluationOptions {
@@ -52,6 +57,8 @@ impl Default for EvaluationOptions {
             prefill_utilization: DEFAULT_PREFILL_UTILIZATION,
             decode_bw_utilization: DEFAULT_DECODE_BW_UTILIZATION,
             concurrency_degradation: 1.0,
+            kv_cache_bits: 16,
+            paged_attention: false,
         }
     }
 }
@@ -68,8 +75,12 @@ pub struct EvaluationReport {
     pub profile: ArchitectureProfile,
     pub weight: WeightReport,
     pub total_params_estimate: AnnotatedValue<u64>,
+    pub active_params_estimate: AnnotatedValue<u64>,
     pub reconciliation: ReconciliationReport,
     pub kv_cache_by_context: BTreeMap<u64, AnnotatedValue<u64>>,
+    pub activation_by_context: BTreeMap<u64, AnnotatedValue<u64>>,
+    pub kv_cache_bits: u64,
+    pub paged_attention: bool,
     pub engine_match: Option<EngineCompatEntry>,
     pub fleet: Option<FleetRecommendation>,
     pub generated_command: Option<String>,
@@ -115,6 +126,7 @@ impl Evaluator {
         let profile = detect(&artifact.config);
 
         let total_params_estimate = estimate_total_params(&profile);
+        let active_params_estimate = estimate_active_params(&profile);
         let total_params = total_params_estimate.value;
 
         let observed_bytes_for_fp = artifact
@@ -141,8 +153,21 @@ impl Evaluator {
 
         let contexts_to_report = select_context_lengths(&profile, options.context_length);
         let kv_cache_by_context = contexts_to_report
+            .iter()
+            .copied()
+            .map(|ctx| {
+                let kv = compute_kv_cache_bits(&profile, ctx, options.kv_cache_bits.max(1));
+                let kv = if options.paged_attention {
+                    apply_paged_attention(kv)
+                } else {
+                    kv
+                };
+                (ctx, kv)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let activation_by_context = contexts_to_report
             .into_iter()
-            .map(|ctx| (ctx, compute_kv_cache_bytes(&profile, ctx, 2)))
+            .map(|ctx| (ctx, compute_activation_bytes(&profile, ctx)))
             .collect::<BTreeMap<_, _>>();
 
         let engine_match = find_match(engine, &profile.model_type, None, None);
@@ -159,23 +184,40 @@ impl Evaluator {
                 let (reference_ctx, kv_ref_bytes) = reference_context_bytes(&kv_cache_by_context)
                     .unwrap_or_else(|| {
                         let fallback_ctx = model_max_context(&profile).unwrap_or(KV_REFERENCE_CTX);
-                        (
+                        let kv = compute_kv_cache_bits(
+                            &profile,
                             fallback_ctx,
-                            compute_kv_cache_bytes(&profile, fallback_ctx, 2).value,
-                        )
+                            options.kv_cache_bits.max(1),
+                        );
+                        let kv = if options.paged_attention {
+                            apply_paged_attention(kv)
+                        } else {
+                            kv
+                        };
+                        (fallback_ctx, kv.value)
                     });
                 let kv_by_context_bytes = kv_cache_by_context
                     .iter()
                     .filter_map(|(ctx, value)| (value.value > 0).then_some((*ctx, value.value)))
                     .collect::<Vec<_>>();
-                let recommendation = plan(
+                let activation_by_context_bytes = activation_by_context
+                    .iter()
+                    .filter_map(|(ctx, value)| (value.value > 0).then_some((*ctx, value.value)))
+                    .collect::<Vec<_>>();
+                let activation_ref_bytes = activation_by_context
+                    .get(&reference_ctx)
+                    .map(|value| value.value)
+                    .unwrap_or(0);
+                let recommendation = plan_with_activation(
                     &profile,
                     weight.total_bytes.value,
                     kv_ref_bytes.max(1),
+                    activation_ref_bytes,
                     reference_ctx,
                     spec,
                     options.gpu_count,
                     &kv_by_context_bytes,
+                    &activation_by_context_bytes,
                 );
                 if let Some(chosen_option) = recommendation.best_option() {
                     generated_command = Some(generate_command(
@@ -204,7 +246,7 @@ impl Evaluator {
 
                 prefill = Some(estimate_prefill(
                     &profile,
-                    total_params,
+                    active_params_estimate.value,
                     spec,
                     chosen,
                     input_tokens,
@@ -212,9 +254,9 @@ impl Evaluator {
                 ));
 
                 let moe_active_ratio = profile.moe.as_ref().and_then(|moe| {
-                    let active = moe.num_experts_per_tok + moe.num_shared_experts;
-                    let total = moe.num_routed_experts + moe.num_shared_experts;
-                    (total > 0).then_some(active as f64 / total as f64)
+                    let _ = moe;
+                    (total_params > 0 && active_params_estimate.value > 0)
+                        .then_some(active_params_estimate.value as f64 / total_params as f64)
                 });
 
                 let decode_estimate = estimate_decode(
@@ -235,7 +277,8 @@ impl Evaluator {
                         .usable_bytes_per_gpu
                         .saturating_sub(chosen_option.weight_bytes_per_gpu);
                     let shards = effective_kv_shards(&profile, chosen).max(1);
-                    let kv_ref_per_gpu = (kv_ref_bytes / shards).max(1);
+                    let kv_ref_per_gpu = kv_ref_bytes.div_ceil(shards).max(1)
+                        + chosen_option.activation_bytes_per_request_per_gpu;
                     concurrency = Some(analyze_concurrency(
                         headroom_per_gpu,
                         kv_ref_per_gpu,
@@ -260,8 +303,12 @@ impl Evaluator {
             profile,
             weight,
             total_params_estimate,
+            active_params_estimate,
             reconciliation,
             kv_cache_by_context,
+            activation_by_context,
+            kv_cache_bits: options.kv_cache_bits,
+            paged_attention: options.paged_attention,
             engine_match,
             fleet,
             generated_command,
@@ -372,6 +419,18 @@ fn reference_context_bytes(
         .iter()
         .next_back()
         .map(|(ctx, value)| (*ctx, value.value))
+}
+
+fn apply_paged_attention(mut value: AnnotatedValue<u64>) -> AnnotatedValue<u64> {
+    if value.value == 0 {
+        return value;
+    }
+    value.value = value.value * 3 / 4;
+    value.source = Some(match value.source {
+        Some(source) => format!("{source}; paged attention factor 0.75"),
+        None => "paged attention factor 0.75".to_string(),
+    });
+    value
 }
 
 fn generate_command(

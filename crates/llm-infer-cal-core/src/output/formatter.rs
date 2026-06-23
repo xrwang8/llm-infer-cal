@@ -86,6 +86,20 @@ pub fn render_report_json(report: &EvaluationReport) -> Result<String, serde_jso
                 })
             })
             .collect::<Vec<_>>(),
+        "activation_by_context": report
+            .activation_by_context
+            .iter()
+            .map(|(ctx, value)| {
+                json!({
+                    "context_tokens": ctx,
+                    "bytes": annotated_u64(value),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "inference_options": {
+            "kv_cache_bits": report.kv_cache_bits,
+            "paged_attention": report.paged_attention,
+        },
         "engine_compatibility": engine_json(report),
         "hardware": hardware_json(report),
         "fleet": fleet_json(report),
@@ -784,6 +798,7 @@ fn weights_json(report: &EvaluationReport) -> Value {
     json!({
         "safetensors_total_bytes": annotated_u64(&report.weight.total_bytes),
         "params_estimated": annotated_u64(&report.total_params_estimate),
+        "active_params_estimated": annotated_u64(&report.active_params_estimate),
         "bits_per_param": report.weight.bits_per_param.as_ref().map(annotated_f64),
         "quantization_guess": annotated_str(
             report.weight.quantization_guess.value.as_str(),
@@ -892,7 +907,12 @@ fn fleet_json(report: &EvaluationReport) -> Value {
                 "node_count": option.node_count,
                 "weight_bytes_per_gpu": option.weight_bytes_per_gpu,
                 "kv_bytes_per_request": option.kv_bytes_per_request,
+                "kv_bytes_per_request_per_gpu": option.kv_bytes_per_request_per_gpu,
+                "activation_bytes_per_request": option.activation_bytes_per_request,
+                "activation_bytes_per_request_per_gpu": option.activation_bytes_per_request_per_gpu,
                 "kv_reference_context_tokens": option.kv_reference_context_tokens,
+                "tier_concurrent_requests": option.tier_concurrent_requests,
+                "required_bytes_per_gpu_at_tier": option.required_bytes_per_gpu_at_tier,
                 "max_concurrent_at_reference_ctx": option.max_concurrent_at_reference_ctx,
                 "max_concurrent_by_context": option.max_concurrent_by_context.iter().map(|(ctx, count)| {
                     json!({
@@ -901,6 +921,7 @@ fn fleet_json(report: &EvaluationReport) -> Value {
                     })
                 }).collect::<Vec<_>>(),
                 "usable_bytes_per_gpu": option.usable_bytes_per_gpu,
+                "reserved_bytes_per_gpu": option.reserved_bytes_per_gpu,
                 "fits": option.fits,
                 "reason_en": option.reason_en,
                 "reason_zh": option.reason_zh,
@@ -919,6 +940,10 @@ fn performance_json(report: &EvaluationReport) -> Value {
         "input_tokens": report.perf_input_tokens,
         "output_tokens": report.perf_output_tokens,
         "target_tokens_per_sec": report.perf_target_tokens_per_sec,
+        "options": {
+            "kv_cache_bits": report.kv_cache_bits,
+            "paged_attention": report.paged_attention,
+        },
         "prefill": {
             "total_flops": annotated_u64(&prefill.total_flops),
             "peak_effective_tflops": annotated_f64(&prefill.peak_effective_tflops),

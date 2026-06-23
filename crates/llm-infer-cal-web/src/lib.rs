@@ -147,6 +147,11 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
     if timeout_s <= 0.0 {
         return Err(ApiError::bad_request("timeout_s must be greater than 0"));
     }
+    if matches!(req.kv_cache_bits, Some(0)) {
+        return Err(ApiError::bad_request(
+            "kv_cache_bits must be greater than 0",
+        ));
+    }
 
     let source_name = req.source.as_deref().unwrap_or("builtin");
     let source = source_from_name(source_name, timeout_s).map_err(ApiError::bad_request)?;
@@ -168,6 +173,8 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
         concurrency_degradation: req
             .concurrency_degradation
             .unwrap_or(defaults.concurrency_degradation),
+        kv_cache_bits: req.kv_cache_bits.unwrap_or(defaults.kv_cache_bits),
+        paged_attention: req.paged_attention.unwrap_or(defaults.paged_attention),
     };
 
     let reports = gpu_ids
@@ -225,9 +232,9 @@ fn requested_gpus(req: &EvaluateRequest) -> Result<Vec<String>, ApiError> {
     if gpus.is_empty() {
         return Err(ApiError::bad_request("gpu is required"));
     }
-    if gpus.len() > 4 {
+    if gpus.len() > 64 {
         return Err(ApiError::bad_request(
-            "gpus accepts at most 4 items for comparison",
+            "gpus accepts at most 64 items for comparison",
         ));
     }
     Ok(gpus)
@@ -279,6 +286,8 @@ struct EvaluateRequest {
     prefill_utilization: Option<f64>,
     decode_bw_utilization: Option<f64>,
     concurrency_degradation: Option<f64>,
+    kv_cache_bits: Option<u64>,
+    paged_attention: Option<bool>,
     explain: Option<bool>,
     llm_review: Option<bool>,
     llm_review_api_key: Option<String>,
@@ -453,6 +462,8 @@ mod tests {
             prefill_utilization: None,
             decode_bw_utilization: None,
             concurrency_degradation: None,
+            kv_cache_bits: None,
+            paged_attention: None,
             explain: None,
             llm_review: Some(true),
             llm_review_api_key: api_key.map(ToOwned::to_owned),

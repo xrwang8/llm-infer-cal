@@ -77,10 +77,44 @@ fn giant_llama_artifact() -> ModelArtifact {
     }
 }
 
+fn moe_artifact() -> ModelArtifact {
+    ModelArtifact {
+        source: "huggingface".to_string(),
+        model_id: "test/moe-mini".to_string(),
+        commit_sha: Some("moesha".to_string()),
+        config: json!({
+            "model_type": "qwen3_moe",
+            "architectures": ["Qwen3MoeForCausalLM"],
+            "num_hidden_layers": 2,
+            "hidden_size": 16,
+            "vocab_size": 100,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "intermediate_size": 64,
+            "num_experts": 4,
+            "n_shared_experts": 1,
+            "num_experts_per_tok": 2,
+            "moe_intermediate_size": 32,
+            "max_position_embeddings": 8192
+        }),
+        siblings: vec![SiblingFile {
+            filename: "model.safetensors".to_string(),
+            size: Some(20_288),
+        }],
+    }
+}
+
 fn evaluator() -> Evaluator {
     Evaluator::without_cache(Box::new(StaticSource {
         name: "huggingface",
         artifact: llama_artifact(),
+    }))
+}
+
+fn moe_evaluator() -> Evaluator {
+    Evaluator::without_cache(Box::new(StaticSource {
+        name: "huggingface",
+        artifact: moe_artifact(),
     }))
 }
 
@@ -185,6 +219,97 @@ fn evaluate_uses_model_max_context_instead_of_fixed_reference_context() {
         assert!(!option.reason_en.contains("128K"));
         assert!(!option.reason_zh.contains("128K"));
     }
+}
+
+#[test]
+fn evaluate_applies_kv_bits_and_paged_attention_to_kv_cache() {
+    let plain = evaluator()
+        .evaluate(
+            "test/llama-mini",
+            "H800",
+            "vllm",
+            EvaluationOptions {
+                context_length: Some(4096),
+                kv_cache_bits: 16,
+                paged_attention: false,
+                ..EvaluationOptions::default()
+            },
+        )
+        .unwrap();
+    let paged_fp8 = evaluator()
+        .evaluate(
+            "test/llama-mini",
+            "H800",
+            "vllm",
+            EvaluationOptions {
+                context_length: Some(4096),
+                kv_cache_bits: 8,
+                paged_attention: true,
+                ..EvaluationOptions::default()
+            },
+        )
+        .unwrap();
+
+    let plain_kv = plain.kv_cache_by_context.get(&4096).unwrap().value;
+    let paged_kv = paged_fp8.kv_cache_by_context.get(&4096).unwrap().value;
+
+    assert_eq!(paged_kv, plain_kv * 3 / 8);
+    assert_eq!(paged_fp8.kv_cache_bits, 8);
+    assert!(paged_fp8.paged_attention);
+    assert!(paged_fp8
+        .kv_cache_by_context
+        .get(&4096)
+        .unwrap()
+        .source
+        .as_deref()
+        .unwrap_or("")
+        .contains("paged"));
+}
+
+#[test]
+fn evaluate_uses_moe_active_params_for_prefill_and_decode() {
+    let report = moe_evaluator()
+        .evaluate(
+            "test/moe-mini",
+            "H800",
+            "vllm",
+            EvaluationOptions {
+                gpu_count: Some(1),
+                context_length: Some(4096),
+                input_tokens: Some(100),
+                prefill_utilization: 1.0,
+                decode_bw_utilization: 1.0,
+                ..EvaluationOptions::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(report.total_params_estimate.value, 20_288);
+    assert_eq!(report.active_params_estimate.value, 14_144);
+    assert_eq!(
+        report.prefill.as_ref().unwrap().total_flops.value,
+        2 * 14_144 * 100
+    );
+    assert_eq!(
+        report
+            .decode
+            .as_ref()
+            .unwrap()
+            .active_weight_bytes_per_gpu
+            .value,
+        14_144
+    );
+    assert_eq!(
+        report
+            .decode
+            .as_ref()
+            .unwrap()
+            .moe_active_weight_bytes_per_gpu
+            .as_ref()
+            .unwrap()
+            .value,
+        14_144
+    );
 }
 
 #[test]

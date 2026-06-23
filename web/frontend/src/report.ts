@@ -8,10 +8,16 @@ export type FleetOption = {
   weight_bytes_per_gpu?: number;
   usable_bytes_per_gpu?: number;
   kv_bytes_per_request?: number;
+  kv_bytes_per_request_per_gpu?: number;
+  activation_bytes_per_request?: number;
+  activation_bytes_per_request_per_gpu?: number;
   kv_reference_context_tokens?: number;
+  tier_concurrent_requests?: number;
+  required_bytes_per_gpu_at_tier?: number;
   max_concurrent_at_reference_ctx?: number;
   reason_zh?: string;
   reason_en?: string;
+  reserved_bytes_per_gpu?: number;
 };
 
 export type Fleet = {
@@ -65,6 +71,14 @@ export type Report = {
     context_tokens?: number;
     bytes?: Annotated<number>;
   }>;
+  activation_by_context?: Array<{
+    context_tokens?: number;
+    bytes?: Annotated<number>;
+  }>;
+  inference_options?: {
+    kv_cache_bits?: number;
+    paged_attention?: boolean;
+  };
   engine_compatibility?: Record<string, any> | null;
   hardware?: GpuSummary | null;
   fleet?: Fleet | null;
@@ -99,6 +113,8 @@ export type EvaluateForm = {
   prefill_utilization: string;
   decode_bw_utilization: string;
   concurrency_degradation: string;
+  kv_cache_bits: string;
+  paged_attention: boolean;
   llm_review: boolean;
   llm_review_api_key: string;
   llm_review_base_url: string;
@@ -397,6 +413,8 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     prefill_utilization: numberOrUndefined(form.prefill_utilization),
     decode_bw_utilization: numberOrUndefined(form.decode_bw_utilization),
     concurrency_degradation: numberOrUndefined(form.concurrency_degradation),
+    kv_cache_bits: numberOrUndefined(form.kv_cache_bits),
+    paged_attention: form.paged_attention,
     explain: true,
     llm_review: form.llm_review,
     llm_review_api_key: form.llm_review ? stringOrUndefined(form.llm_review_api_key) : undefined,
@@ -415,7 +433,7 @@ function selectedGpus(form: EvaluateForm): string[] {
       gpus.push(trimmed);
     }
   }
-  return gpus.slice(0, 4);
+  return gpus.slice(0, 64);
 }
 
 export function tierText(tier: string | null | undefined): string {
@@ -430,4 +448,34 @@ export function pct(numerator: number, denominator: number): number {
     return 0;
   }
   return Math.max(0, Math.min(100, (numerator / denominator) * 100));
+}
+
+export function gpuTier(gpu: GpuSummary): string {
+  const id = gpu.id.toUpperCase();
+  if (
+    id.includes('H100') ||
+    id.includes('H200') ||
+    id.includes('H800') ||
+    id.includes('H20') ||
+    id.includes('B200') ||
+    id.includes('GB200') ||
+    id.includes('MI300') ||
+    id.includes('MI325') ||
+    id.includes('MI350') ||
+    id.includes('910') ||
+    id.includes('GAUDI')
+  ) {
+    return 'datacenter';
+  }
+  if ((gpu.memory_gb ?? 0) >= 48 || id.startsWith('L40') || id.startsWith('A100') || id.startsWith('A40')) {
+    return 'prosumer';
+  }
+  return 'consumer';
+}
+
+export function gpuTierLabel(tier: string): string {
+  if (tier === 'datacenter') return '数据中心';
+  if (tier === 'prosumer') return '专业/工作站';
+  if (tier === 'consumer') return '消费级';
+  return '全部层级';
 }

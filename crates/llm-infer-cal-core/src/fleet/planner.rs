@@ -14,10 +14,16 @@ pub struct FleetOption {
     pub node_count: u64,
     pub weight_bytes_per_gpu: u64,
     pub kv_bytes_per_request: u64,
+    pub kv_bytes_per_request_per_gpu: u64,
+    pub activation_bytes_per_request: u64,
+    pub activation_bytes_per_request_per_gpu: u64,
     pub kv_reference_context_tokens: u64,
+    pub tier_concurrent_requests: u64,
+    pub required_bytes_per_gpu_at_tier: u64,
     pub max_concurrent_at_reference_ctx: u64,
     pub max_concurrent_by_context: Vec<(u64, u64)>,
     pub usable_bytes_per_gpu: u64,
+    pub reserved_bytes_per_gpu: u64,
     pub fits: bool,
     pub reason_en: String,
     pub reason_zh: String,
@@ -45,11 +51,14 @@ struct EvalContext<'a> {
     profile: &'a ArchitectureProfile,
     weight_bytes: u64,
     kv_bytes: u64,
+    activation_bytes: u64,
     reference_context_tokens: u64,
+    total_memory_per_gpu: u64,
     usable_per_gpu: u64,
     valid_tp: &'a [u64],
     candidates: &'a [u64],
     kv_by_context: &'a [(u64, u64)],
+    activation_by_context: &'a [(u64, u64)],
 }
 
 pub fn plan(
@@ -61,6 +70,31 @@ pub fn plan(
     forced_gpu_count: Option<u64>,
     kv_bytes_by_context: &[(u64, u64)],
 ) -> FleetRecommendation {
+    plan_with_activation(
+        profile,
+        weight_bytes,
+        kv_bytes_per_request_at_ref,
+        0,
+        reference_context_tokens,
+        gpu,
+        forced_gpu_count,
+        kv_bytes_by_context,
+        &[],
+    )
+}
+
+pub fn plan_with_activation(
+    profile: &ArchitectureProfile,
+    weight_bytes: u64,
+    kv_bytes_per_request_at_ref: u64,
+    activation_bytes_per_request_at_ref: u64,
+    reference_context_tokens: u64,
+    gpu: &GPUSpec,
+    forced_gpu_count: Option<u64>,
+    kv_bytes_by_context: &[(u64, u64)],
+    activation_bytes_by_context: &[(u64, u64)],
+) -> FleetRecommendation {
+    let total_memory_per_gpu = (gpu.memory_gb as f64 * 1_000_000_000.0) as u64;
     let usable_per_gpu =
         (gpu.memory_gb as f64 * 1_000_000_000.0 * (1.0 - OVERHEAD_FRACTION)) as u64;
     let valid_tp = valid_tp_sizes(profile);
@@ -71,11 +105,14 @@ pub fn plan(
         profile,
         weight_bytes,
         kv_bytes: kv_bytes_per_request_at_ref,
+        activation_bytes: activation_bytes_per_request_at_ref,
         reference_context_tokens,
+        total_memory_per_gpu,
         usable_per_gpu,
         valid_tp: &valid_tp,
         candidates: &candidates,
         kv_by_context: kv_bytes_by_context,
+        activation_by_context: activation_bytes_by_context,
     };
 
     if let Some(forced_gpu_count) = forced_gpu_count {
@@ -98,6 +135,7 @@ pub fn plan(
             profile,
             weight_bytes,
             kv_bytes_per_request_at_ref,
+            activation_bytes_per_request_at_ref,
             usable_per_gpu,
             concurrent,
         );
@@ -186,6 +224,7 @@ fn smallest_fitting_count(
     profile: &ArchitectureProfile,
     weight_bytes: u64,
     kv_bytes: u64,
+    activation_bytes: u64,
     usable_per_gpu: u64,
     concurrent: u64,
 ) -> Option<u64> {
@@ -195,6 +234,7 @@ fn smallest_fitting_count(
             profile,
             weight_bytes,
             kv_bytes,
+            activation_bytes,
             usable_per_gpu,
             concurrent,
         )
@@ -206,13 +246,15 @@ fn fits(
     profile: &ArchitectureProfile,
     weight_bytes: u64,
     kv_bytes: u64,
+    activation_bytes: u64,
     usable_per_gpu: u64,
     concurrent: u64,
 ) -> bool {
     let weight_per_gpu = ceil_div(weight_bytes, gpu_count);
     let shards = effective_kv_shards(profile, gpu_count);
     let kv_per_gpu = ceil_div(kv_bytes, shards);
-    let needed = weight_per_gpu + concurrent * kv_per_gpu;
+    let activation_per_gpu = ceil_div(activation_bytes, gpu_count.max(1));
+    let needed = weight_per_gpu + concurrent * (kv_per_gpu + activation_per_gpu);
     needed <= usable_per_gpu
 }
 
@@ -222,15 +264,25 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     let weight_per_gpu = ceil_div(eval.weight_bytes, gpu_count);
     let shards = effective_kv_shards(eval.profile, gpu_count);
     let kv_per_gpu = ceil_div(eval.kv_bytes, shards);
+    let activation_per_gpu = ceil_div(eval.activation_bytes, gpu_count.max(1));
+    let per_request_per_gpu = kv_per_gpu + activation_per_gpu;
     let headroom = eval.usable_per_gpu.saturating_sub(weight_per_gpu);
-    let max_concurrent = headroom.checked_div(kv_per_gpu).unwrap_or(0);
+    let max_concurrent = headroom.checked_div(per_request_per_gpu).unwrap_or(0);
     let mut max_concurrent_by_context = eval
         .kv_by_context
         .iter()
         .map(|(ctx, kv)| {
             let kv_per_gpu = ceil_div(*kv, shards);
-            let concurrent = if *kv > 0 {
-                headroom.checked_div(kv_per_gpu).unwrap_or(0)
+            let activation = eval
+                .activation_by_context
+                .iter()
+                .find(|(activation_ctx, _)| activation_ctx == ctx)
+                .map(|(_, bytes)| *bytes)
+                .unwrap_or(0);
+            let activation_per_gpu = ceil_div(activation, gpu_count.max(1));
+            let per_request = kv_per_gpu + activation_per_gpu;
+            let concurrent = if per_request > 0 {
+                headroom.checked_div(per_request).unwrap_or(0)
             } else {
                 0
             };
@@ -245,11 +297,14 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         "prod" => 16,
         _ => 8,
     };
+    let required_bytes_per_gpu_at_tier =
+        weight_per_gpu + tier_concurrent * (kv_per_gpu + activation_per_gpu);
     let fits = fits(
         gpu_count,
         eval.profile,
         eval.weight_bytes,
         eval.kv_bytes,
+        eval.activation_bytes,
         eval.usable_per_gpu,
         tier_concurrent,
     );
@@ -279,11 +334,11 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     } else if !fits {
         (
             format!(
-                "Weights + {tier_concurrent}x KV would exceed {:.1} GB usable per GPU",
+                "Weights + {tier_concurrent}x KV/activation would exceed {:.1} GB usable per GPU",
                 eval.usable_per_gpu as f64 / 1e9
             ),
             format!(
-                "权重 + {tier_concurrent} 份 KV 超过单卡可用的 {:.1} GB",
+                "权重 + {tier_concurrent} 份 KV/Activation 超过单卡可用的 {:.1} GB",
                 eval.usable_per_gpu as f64 / 1e9
             ),
         )
@@ -308,10 +363,18 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         node_count,
         weight_bytes_per_gpu: weight_per_gpu,
         kv_bytes_per_request: eval.kv_bytes,
+        kv_bytes_per_request_per_gpu: kv_per_gpu,
+        activation_bytes_per_request: eval.activation_bytes,
+        activation_bytes_per_request_per_gpu: activation_per_gpu,
         kv_reference_context_tokens: eval.reference_context_tokens,
+        tier_concurrent_requests: tier_concurrent,
+        required_bytes_per_gpu_at_tier,
         max_concurrent_at_reference_ctx: max_concurrent,
         max_concurrent_by_context,
         usable_bytes_per_gpu: eval.usable_per_gpu,
+        reserved_bytes_per_gpu: eval
+            .total_memory_per_gpu
+            .saturating_sub(eval.usable_per_gpu),
         fits,
         reason_en,
         reason_zh,

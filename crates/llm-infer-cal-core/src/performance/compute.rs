@@ -108,8 +108,23 @@ pub fn estimate_decode(
     let num_gpus = num_gpus.max(1);
     let bw_bytes_per_s = memory_bandwidth_gbps as f64 * 1e9;
     let effective_bw = bw_bytes_per_s * bw_utilization;
-    let weight_per_gpu = (total_weight_bytes / num_gpus).max(1);
-    let per_gpu_tps = effective_bw / weight_per_gpu as f64;
+    let total_weight_per_gpu = (total_weight_bytes / num_gpus).max(1);
+    let mut primary_weight_per_gpu = total_weight_per_gpu;
+    let mut primary_weight_source = format!(
+        "{} bytes / {num_gpus} TP ranks",
+        fmt_u64(total_weight_bytes)
+    );
+    if profile.is_moe() {
+        if let Some(ratio) = moe_active_params_ratio.filter(|ratio| *ratio > 0.0) {
+            primary_weight_per_gpu = ((total_weight_per_gpu as f64 * ratio) as u64).max(1);
+            primary_weight_source = format!(
+                "{} × {ratio:.3} active/total MoE ratio",
+                fmt_u64(total_weight_per_gpu)
+            );
+        }
+    }
+
+    let per_gpu_tps = effective_bw / primary_weight_per_gpu as f64;
     let nvlink_eff = nvlink_efficiency(gpu, num_gpus);
     let effective_comm_eff = cluster_comm_efficiency * nvlink_eff;
     let cluster_tps = per_gpu_tps * num_gpus as f64 * effective_comm_eff;
@@ -118,10 +133,10 @@ pub fn estimate_decode(
     let mut moe_active_tps = None;
     if profile.is_moe() {
         if let Some(ratio) = moe_active_params_ratio.filter(|ratio| *ratio > 0.0) {
-            let active_bytes = (weight_per_gpu as f64 * ratio) as u64;
+            let active_bytes = ((total_weight_per_gpu as f64 * ratio) as u64).max(1);
             let weight_source = format!(
                 "{} × {ratio:.3} (active/total ratio)",
-                fmt_u64(weight_per_gpu)
+                fmt_u64(total_weight_per_gpu)
             );
             moe_active_weight = Some(AnnotatedValue::new(
                 active_bytes,
@@ -144,14 +159,10 @@ pub fn estimate_decode(
         }
     }
 
-    let weight_source = format!(
-        "{} bytes / {num_gpus} TP ranks",
-        fmt_u64(total_weight_bytes)
-    );
     let per_gpu_source = format!(
         "{memory_bandwidth_gbps} GB/s × {:.0}% util / {} weight bytes",
         bw_utilization * 100.0,
-        fmt_u64(weight_per_gpu)
+        fmt_u64(primary_weight_per_gpu)
     );
     let cluster_source = format!(
         "per-GPU × {num_gpus} GPUs × {:.0}% comm × {nvlink_eff:.3} NVLink penalty (NVLink={} GB/s)",
@@ -161,9 +172,9 @@ pub fn estimate_decode(
 
     DecodeEstimate {
         active_weight_bytes_per_gpu: AnnotatedValue::new(
-            weight_per_gpu,
+            primary_weight_per_gpu,
             Label::Estimated,
-            Some(&weight_source),
+            Some(&primary_weight_source),
         ),
         per_gpu_tokens_per_sec: AnnotatedValue::new(
             per_gpu_tps,

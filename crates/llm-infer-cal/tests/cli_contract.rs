@@ -19,6 +19,8 @@ const USAGE_OPTIONS: &[&str] = &[
     "--prefill-util",
     "--decode-bw-util",
     "--concurrency-degradation",
+    "--kv-cache-bits",
+    "--paged-attention",
     "--explain",
     "--llm-review",
     "--source",
@@ -138,6 +140,9 @@ fn all_runtime_flags_parse_before_source_validation() {
         "0.44",
         "--concurrency-degradation",
         "1.67",
+        "--kv-cache-bits",
+        "8",
+        "--paged-attention",
         "--explain",
         "--llm-review",
         "--source",
@@ -276,6 +281,43 @@ fn builtin_qwen36_can_render_machine_readable_json() {
         .unwrap()
         .iter()
         .any(|line| line == "--tool-call-parser qwen3_xml"));
+}
+
+#[test]
+fn builtin_qwen36_json_includes_inference_optimization_options() {
+    let exit = run_cli([
+        "llm-infer-cal",
+        "--lang",
+        "zh",
+        "Qwen/Qwen3.6-35B-A3B",
+        "--gpu",
+        "H100",
+        "--source",
+        "builtin",
+        "--context-length",
+        "4096",
+        "--kv-cache-bits",
+        "8",
+        "--paged-attention",
+        "--json",
+    ]);
+
+    assert_eq!(exit.code, 0, "stderr: {}", exit.stderr);
+    assert!(exit.stderr.is_empty());
+    let json: serde_json::Value =
+        serde_json::from_str(&exit.stdout).expect("stdout should be valid JSON");
+    assert_eq!(json["inference_options"]["kv_cache_bits"], 8);
+    assert_eq!(json["inference_options"]["paged_attention"], true);
+    assert!(json["kv_cache_by_context"][0]["bytes"]["source"]
+        .as_str()
+        .unwrap()
+        .contains("paged attention"));
+    assert!(
+        json["activation_by_context"][0]["bytes"]["value"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
 }
 
 #[test]

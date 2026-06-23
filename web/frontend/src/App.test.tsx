@@ -22,4 +22,13 @@ describe('App shell', () => {
     expect(html).not.toContain('输出推导链（--explain）');
     expect(html).not.toContain('刷新缓存');
   });
+
+  it('renders reference-inspired calculator sections', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('VRAM Breakdown');
+    expect(html).toContain('Formula Reference');
+    expect(html).toContain('Inference Optimizations');
+    expect(html).toContain('GPU 对比');
+  });
 });

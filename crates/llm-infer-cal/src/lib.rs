@@ -56,6 +56,10 @@ Options:
           Memory-bandwidth utilization factor for decode [default: 0.5]
       --concurrency-degradation <CONCURRENCY_DEGRADATION>
           High-concurrency throughput degradation factor [default: 1]
+      --kv-cache-bits <KV_CACHE_BITS>
+          KV cache precision in bits per element [default: 16]
+      --paged-attention
+          Apply paged-attention KV memory factor (0.75)
       --explain
           Print the full derivation trace
       --llm-review
@@ -90,6 +94,8 @@ const COMPLETION_OPTIONS: &[&str] = &[
     "--prefill-util",
     "--decode-bw-util",
     "--concurrency-degradation",
+    "--kv-cache-bits",
+    "--paged-attention",
     "--explain",
     "--llm-review",
     "--source",
@@ -177,6 +183,14 @@ struct Cli {
     #[arg(long = "concurrency-degradation", default_value_t = 1.0)]
     concurrency_degradation: f64,
 
+    /// KV cache precision in bits per element.
+    #[arg(long = "kv-cache-bits", default_value_t = 16)]
+    kv_cache_bits: u64,
+
+    /// Apply paged-attention KV memory factor (0.75).
+    #[arg(long = "paged-attention")]
+    paged_attention: bool,
+
     /// Print the full derivation trace.
     #[arg(long)]
     explain: bool,
@@ -243,6 +257,9 @@ where
     if cli.timeout_s <= 0.0 {
         return CliExit::err(1, "--timeout-s must be greater than 0.\n");
     }
+    if cli.kv_cache_bits == 0 {
+        return CliExit::err(1, "--kv-cache-bits must be greater than 0.\n");
+    }
 
     if cli.list_gpus {
         return match load_database() {
@@ -289,6 +306,8 @@ where
         prefill_utilization: cli.prefill_util,
         decode_bw_utilization: cli.decode_bw_util,
         concurrency_degradation: cli.concurrency_degradation,
+        kv_cache_bits: cli.kv_cache_bits,
+        paged_attention: cli.paged_attention,
     };
 
     let report = match evaluator.evaluate(model_id, gpu, &cli.engine, options) {

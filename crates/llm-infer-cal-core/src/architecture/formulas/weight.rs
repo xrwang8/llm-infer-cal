@@ -40,6 +40,53 @@ pub fn estimate_total_params(profile: &ArchitectureProfile) -> AnnotatedValue<u6
     )
 }
 
+pub fn estimate_active_params(profile: &ArchitectureProfile) -> AnnotatedValue<u64> {
+    if profile.num_hidden_layers == 0 || profile.hidden_size == 0 {
+        return AnnotatedValue::new(
+            0,
+            Label::Unknown,
+            Some("insufficient shape info in profile"),
+        );
+    }
+
+    if profile.moe.is_none() {
+        let mut total = estimate_total_params(profile);
+        total.source = total
+            .source
+            .map(|source| format!("dense model active params equal total params; {source}"));
+        return total;
+    }
+
+    let hidden = profile.hidden_size;
+    let n_layers = profile.num_hidden_layers;
+    let vocab = profile.vocab_size;
+
+    let embed_params = vocab * hidden;
+    let output_head_params = if profile.tie_word_embeddings {
+        0
+    } else {
+        vocab * hidden
+    };
+
+    let attn_params = attention_params(profile);
+    let active_ffn_params = active_ffn_params(profile);
+    let norm_params = 2 * hidden;
+
+    let active = embed_params
+        + output_head_params
+        + (attn_params + active_ffn_params + norm_params) * n_layers;
+
+    AnnotatedValue::new(
+        active,
+        Label::Estimated,
+        Some(&format!(
+            "active MoE params: {vocab} vocab * {hidden} hidden * 2 (embed+head) + {n_layers} layers * ({} attn + {} active ffn + norms)",
+            fmt_u64(attn_params),
+            fmt_u64(active_ffn_params),
+        )),
+    )
+}
+
 pub fn predicted_bytes_under_quant(total_params: u64, scheme: &str) -> AnnotatedValue<u64> {
     let Some(scheme) = QuantizationScheme::from_name(scheme) else {
         return AnnotatedValue::new(0, Label::Unknown, Some("no bytes-per-param mapping"));
@@ -96,6 +143,19 @@ fn ffn_params(profile: &ArchitectureProfile) -> u64 {
         .filter(|intermediate| *intermediate > 0)
         .unwrap_or(4 * hidden);
     3 * hidden * intermediate
+}
+
+fn active_ffn_params(profile: &ArchitectureProfile) -> u64 {
+    let hidden = profile.hidden_size;
+
+    if let Some(moe) = &profile.moe {
+        let single_expert = 3 * hidden * moe.moe_intermediate_size;
+        let active_experts = moe.num_experts_per_tok + moe.num_shared_experts;
+        let router = hidden * moe.num_routed_experts;
+        return single_expert * active_experts + router;
+    }
+
+    ffn_params(profile)
 }
 
 fn fmt_u64(value: u64) -> String {

@@ -27,6 +27,8 @@ import {
   groupGpusByVendor,
   groupModelsByProvider,
   gpuVendorOptionLabel,
+  gpuTier,
+  gpuTierLabel,
   itemsForGroup,
   labelText,
   llmReviewSettings,
@@ -55,6 +57,8 @@ const DEFAULT_FORM: EvaluateForm = {
   prefill_utilization: '0.4',
   decode_bw_utilization: '0.5',
   concurrency_degradation: '1',
+  kv_cache_bits: '16',
+  paged_attention: true,
   llm_review: false,
   llm_review_api_key: '',
   llm_review_base_url: '',
@@ -72,10 +76,20 @@ const engineOptions = [
   { value: 'sglang', label: 'SGLang' },
 ] as const;
 
+const kvPrecisionOptions = [
+  { value: '16', label: 'FP16/BF16' },
+  { value: '8', label: 'FP8/INT8' },
+  { value: '4', label: 'INT4' },
+] as const;
+
 export function App() {
   const [form, setForm] = useState<EvaluateForm>(DEFAULT_FORM);
+  const [activeTab, setActiveTab] = useState<'calculator' | 'compare'>('calculator');
   const [modelVendor, setModelVendor] = useState('Qwen');
   const [gpuVendor, setGpuVendor] = useState('NVIDIA');
+  const [compareVendor, setCompareVendor] = useState('all');
+  const [compareTier, setCompareTier] = useState('all');
+  const [compareGpuCount, setCompareGpuCount] = useState('');
   const [models, setModels] = useState<ModelSummary[]>([]);
   const [gpus, setGpus] = useState<GpuSummary[]>([]);
   const [report, setReport] = useState<Report | null>(null);
@@ -118,8 +132,10 @@ export function App() {
   const command = report?.generated_command?.command ?? '';
   const comparisonReports = report?.comparison?.reports ?? [];
   const kvRows = report?.kv_cache_by_context ?? [];
+  const activationRows = report?.activation_by_context ?? [];
   const weightBytes = annotatedValue<number>(report?.weights?.safetensors_total_bytes);
   const params = annotatedValue<number>(report?.weights?.params_estimated);
+  const activeParams = annotatedValue<number>(report?.weights?.active_params_estimated);
   const maxConcurrent = annotatedValue<number>(report?.performance?.max_concurrent);
   const prefillMs = annotatedValue<number>(report?.performance?.prefill?.latency_ms);
   const clusterTps = annotatedValue<number>(report?.performance?.decode?.cluster_tokens_per_sec);
@@ -127,6 +143,14 @@ export function App() {
   const tuningSettings = performanceSettings();
   const advancedControls = advancedSettings();
   const reviewerSettings = llmReviewSettings();
+  const compareGpuIds = useMemo(() => {
+    const filtered = gpus.filter((gpu) => {
+      const vendorOk = compareVendor === 'all' || gpu.vendor === compareVendor;
+      const tierOk = compareTier === 'all' || gpuTier(gpu) === compareTier;
+      return vendorOk && tierOk;
+    });
+    return filtered.map((gpu) => gpu.id).slice(0, 64);
+  }, [gpus, compareVendor, compareTier]);
 
   async function runEvaluation(nextForm = form) {
     setEvaluating(true);
@@ -168,11 +192,15 @@ export function App() {
     setGpuVendor(value);
   }
 
+  function updatePrimaryGpu(gpuId: string) {
+    setForm((current) => ({ ...current, gpu: gpuId, gpus: gpuId ? [gpuId] : [] }));
+  }
+
   function updateGpuSelection(gpuId: string, checked: boolean) {
     setForm((current) => {
       const currentGpus = current.gpus.length ? current.gpus : current.gpu ? [current.gpu] : [];
       const nextGpus = checked
-        ? [...currentGpus, gpuId].filter((gpu, index, all) => all.indexOf(gpu) === index).slice(0, 4)
+        ? [...currentGpus, gpuId].filter((gpu, index, all) => all.indexOf(gpu) === index).slice(0, 64)
         : currentGpus.filter((gpu) => gpu !== gpuId);
       const boundedGpus = nextGpus.length ? nextGpus : currentGpus;
       return { ...current, gpu: boundedGpus[0] ?? '', gpus: boundedGpus };
@@ -181,7 +209,22 @@ export function App() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    void runEvaluation();
+    if (activeTab === 'compare') {
+      void runComparison();
+      return;
+    }
+    void runEvaluation({ ...form, gpus: selectedGpuId ? [selectedGpuId] : form.gpus });
+  }
+
+  async function runComparison() {
+    const gpusForCompare = compareGpuIds.length ? compareGpuIds : selectedGpuIds;
+    const nextForm: EvaluateForm = {
+      ...form,
+      gpu: gpusForCompare[0] ?? form.gpu,
+      gpus: gpusForCompare,
+      gpu_count: compareGpuCount,
+    };
+    await runEvaluation(nextForm);
   }
 
   function copyCommand() {
@@ -205,6 +248,15 @@ export function App() {
           </div>
         </div>
       </header>
+
+      <nav className="viewTabs" aria-label="主视图">
+        <button type="button" className={activeTab === 'calculator' ? 'active' : ''} onClick={() => setActiveTab('calculator')}>
+          计算器
+        </button>
+        <button type="button" className={activeTab === 'compare' ? 'active' : ''} onClick={() => setActiveTab('compare')}>
+          GPU 对比
+        </button>
+      </nav>
 
       {error ? (
         <div className="errorBanner">
@@ -287,7 +339,7 @@ export function App() {
 
               <label className="field">
                 <span>GPU 型号</span>
-                <GpuPicker options={gpuOptions} selected={selectedGpuIds} onToggle={updateGpuSelection} />
+                <GpuPicker options={gpuOptions} selected={selectedGpuIds} onSelectPrimary={updatePrimaryGpu} onToggle={updateGpuSelection} />
               </label>
             </div>
 
@@ -364,6 +416,24 @@ export function App() {
                     />
                   ),
                 )}
+                <div className="advancedGroup">
+                  <div className="advancedGroupTitle">Inference Optimizations</div>
+                  <label className="field">
+                    <span>KV Cache 精度</span>
+                    <select value={form.kv_cache_bits} onChange={(event) => updateField('kv_cache_bits', event.target.value)}>
+                      {kvPrecisionOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <CheckboxField
+                    label="Paged Attention（KV 显存 × 0.75）"
+                    checked={form.paged_attention}
+                    onChange={(value) => updateField('paged_attention', value)}
+                  />
+                </div>
                 {form.llm_review
                   ? reviewerSettings.map((setting) => (
                       <TextField
@@ -398,6 +468,25 @@ export function App() {
             </div>
           </div>
 
+          {activeTab === 'compare' ? (
+            <section className="panel comparisonPanel">
+              <SectionHeader icon={<Activity size={18} />} title="GPU 对比" />
+              <CompareControls
+                vendors={gpuGroups.map((group) => group.label)}
+                vendor={compareVendor}
+                tier={compareTier}
+                gpuCount={compareGpuCount}
+                selectedCount={compareGpuIds.length}
+                onVendor={setCompareVendor}
+                onTier={setCompareTier}
+                onGpuCount={setCompareGpuCount}
+                onRun={runComparison}
+                disabled={evaluating || !form.model_id.trim()}
+              />
+              <ComparisonTable reports={comparisonReports} />
+            </section>
+          ) : null}
+
           <div className="metricGrid">
             <Metric icon={<Cpu size={18} />} label="推荐 GPU" value={selectedFleet?.gpu_count ? `${selectedFleet.gpu_count} 张` : '-'} detail={tierText(selectedFleet?.tier)} />
             <Metric icon={<Activity size={18} />} label="并发上限" value={formatNumber(maxConcurrent)} detail="K/L 取小" />
@@ -416,12 +505,19 @@ export function App() {
 
           <div className="contentGrid">
             <section className="panel">
-              <SectionHeader icon={<Layers size={18} />} title="显存拆解" />
+              <SectionHeader icon={<Layers size={18} />} title="VRAM Breakdown" />
               <MemoryBreakdown option={selectedFleet} hardware={report?.hardware ?? selectedGpu} />
               <div className="kvList">
                 {kvRows.map((row) => (
                   <div className="kvRow" key={row.context_tokens}>
                     <span>{formatNumber(row.context_tokens)} ctx</span>
+                    <strong>{formatBytes(row.bytes?.value)}</strong>
+                    <small>{labelText(row.bytes?.label)}</small>
+                  </div>
+                ))}
+                {activationRows.map((row) => (
+                  <div className="kvRow" key={`activation-${row.context_tokens}`}>
+                    <span>{formatNumber(row.context_tokens)} ctx activation</span>
                     <strong>{formatBytes(row.bytes?.value)}</strong>
                     <small>{labelText(row.bytes?.label)}</small>
                   </div>
@@ -438,8 +534,8 @@ export function App() {
 
           <div className="contentGrid">
             <section className="panel">
-              <SectionHeader icon={<Gauge size={18} />} title="公式依据" />
-              <EvidenceList report={report} />
+              <SectionHeader icon={<Gauge size={18} />} title="Formula Reference" />
+              <FormulaReference report={report} form={form} activeParams={activeParams} />
             </section>
 
             <section className="panel">
@@ -501,41 +597,39 @@ function Segmented<T extends string>({
 function GpuPicker({
   options,
   selected,
+  onSelectPrimary,
   onToggle,
 }: {
   options: GpuSummary[];
   selected: string[];
+  onSelectPrimary: (gpuId: string) => void;
   onToggle: (gpuId: string, checked: boolean) => void;
 }) {
   const visibleOptions: GpuSummary[] = options.length ? options : selected.map((id) => ({ id }));
   const selectedSet = new Set(selected);
-  const atLimit = selected.length >= 4;
 
   return (
     <div className="gpuPicker" data-testid="gpu-model-picker">
-      <div className="gpuOptionGrid">
-        {visibleOptions.map((gpu) => {
-          const checked = selectedSet.has(gpu.id);
-          const disabled = (!checked && atLimit) || (checked && selected.length <= 1);
-          return (
-            <label className={`gpuOption ${checked ? 'active' : ''}`} key={gpu.id}>
-              <input
-                type="checkbox"
-                checked={checked}
-                disabled={disabled}
-                onChange={(event) => onToggle(gpu.id, event.target.checked)}
-              />
-              <span>{gpu.id}</span>
-              <small>{gpu.memory_gb ? `${gpu.memory_gb}GB` : ''}</small>
-            </label>
-          );
-        })}
-      </div>
+      <select value={selected[0] ?? ''} onChange={(event) => onSelectPrimary(event.target.value)}>
+        {visibleOptions.map((gpu) => (
+          <option key={gpu.id} value={gpu.id}>
+            {gpu.id}
+            {gpu.memory_gb ? ` · ${gpu.memory_gb}GB` : ''}
+          </option>
+        ))}
+      </select>
       <div className="selectedGpuList">
         {selected.map((gpu) => (
-          <span className="selectedGpuChip" key={gpu}>
+          <button
+            className="selectedGpuChip"
+            key={gpu}
+            type="button"
+            disabled={selectedSet.has(gpu) && selected.length <= 1}
+            onClick={() => onToggle(gpu, false)}
+            title="从当前选择中移除"
+          >
             {gpu}
-          </span>
+          </button>
         ))}
       </div>
     </div>
@@ -611,6 +705,69 @@ function LabelBadge({ label, tone }: { label: string; tone: 'good' | 'warn' | 'n
   return <span className={`labelBadge ${tone}`}>{label}</span>;
 }
 
+function CompareControls({
+  vendors,
+  vendor,
+  tier,
+  gpuCount,
+  selectedCount,
+  disabled,
+  onVendor,
+  onTier,
+  onGpuCount,
+  onRun,
+}: {
+  vendors: string[];
+  vendor: string;
+  tier: string;
+  gpuCount: string;
+  selectedCount: number;
+  disabled: boolean;
+  onVendor: (value: string) => void;
+  onTier: (value: string) => void;
+  onGpuCount: (value: string) => void;
+  onRun: () => void;
+}) {
+  return (
+    <div className="compareControls">
+      <label className="field">
+        <span>Provider</span>
+        <select value={vendor} onChange={(event) => onVendor(event.target.value)}>
+          <option value="all">全部厂商</option>
+          {vendors.map((nextVendor) => (
+            <option key={nextVendor} value={nextVendor}>
+              {nextVendor}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>Tier</span>
+        <select value={tier} onChange={(event) => onTier(event.target.value)}>
+          <option value="all">{gpuTierLabel('all')}</option>
+          <option value="datacenter">{gpuTierLabel('datacenter')}</option>
+          <option value="prosumer">{gpuTierLabel('prosumer')}</option>
+          <option value="consumer">{gpuTierLabel('consumer')}</option>
+        </select>
+      </label>
+      <label className="field">
+        <span>GPUs per node</span>
+        <select value={gpuCount} onChange={(event) => onGpuCount(event.target.value)}>
+          <option value="">自动推荐</option>
+          {[1, 2, 4, 8, 16, 32, 64].map((count) => (
+            <option key={count} value={String(count)}>
+              {count}× GPU
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="secondaryButton" type="button" onClick={onRun} disabled={disabled || selectedCount === 0}>
+        对比 {selectedCount} 张 GPU
+      </button>
+    </div>
+  );
+}
+
 function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: string; detail: string }) {
   return (
     <div className="metric">
@@ -626,16 +783,23 @@ function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: 
 
 function MemoryBreakdown({ option, hardware }: { option?: FleetOption; hardware?: GpuSummary | null }) {
   const memoryBytes = (hardware?.memory_gb ?? 0) * 1_000_000_000;
+  const concurrent = option?.tier_concurrent_requests ?? 1;
   const weight = option?.weight_bytes_per_gpu ?? 0;
-  const usable = option?.usable_bytes_per_gpu ?? 0;
-  const headroom = Math.max(usable - weight, 0);
-  const reserved = Math.max(memoryBytes - usable, 0);
+  const kv = (option?.kv_bytes_per_request_per_gpu ?? option?.kv_bytes_per_request ?? 0) * concurrent;
+  const activation = (option?.activation_bytes_per_request_per_gpu ?? 0) * concurrent;
+  const reserved = option?.reserved_bytes_per_gpu ?? Math.max(memoryBytes - (option?.usable_bytes_per_gpu ?? 0), 0);
+  const required = option?.required_bytes_per_gpu_at_tier ?? weight + kv + activation;
 
   return (
     <div className="memoryBars">
-      <Bar label="权重 / GPU" value={weight} total={memoryBytes} tone="weight" />
-      <Bar label="KV 余量 / GPU" value={headroom} total={memoryBytes} tone="kv" />
-      <Bar label="预留" value={reserved} total={memoryBytes} tone="reserved" />
+      <div className="breakdownSummary">
+        <span>Required / GPU</span>
+        <strong>{formatBytes(required)}</strong>
+      </div>
+      <Bar label="Weights / GPU" value={weight} total={memoryBytes} tone="weight" />
+      <Bar label={`KV Cache × ${concurrent}`} value={kv} total={memoryBytes} tone="kv" />
+      <Bar label={`Activations × ${concurrent}`} value={activation} total={memoryBytes} tone="activation" />
+      <Bar label="Reserved / Framework" value={reserved} total={memoryBytes} tone="reserved" />
     </div>
   );
 }
@@ -690,34 +854,47 @@ function FleetTable({ options }: { options: FleetOption[] }) {
 }
 
 function ComparisonTable({ reports }: { reports: Report[] }) {
+  if (!reports.length) {
+    return <p className="emptyText">选择过滤条件后点击对比。</p>;
+  }
+
+  const sorted = [...reports].sort((a, b) => {
+    const aTps = annotatedValue<number>(a.performance?.decode?.cluster_tokens_per_sec) ?? 0;
+    const bTps = annotatedValue<number>(b.performance?.decode?.cluster_tokens_per_sec) ?? 0;
+    return bTps - aTps;
+  });
+
   return (
     <div className="tableWrap">
       <table>
         <thead>
           <tr>
             <th>GPU</th>
-            <th>显存</th>
-            <th>推荐张数</th>
-            <th>并发</th>
-            <th>Decode</th>
-            <th>Prefill</th>
+            <th>Min GPUs</th>
+            <th>GPU VRAM</th>
+            <th>TTFT</th>
+            <th>Tok/s</th>
+            <th>Total Tok/s</th>
+            <th>Mem BW</th>
             <th>状态</th>
           </tr>
         </thead>
         <tbody>
-          {reports.map((item) => {
+          {sorted.map((item) => {
             const option = bestFleetOption(item.fleet);
             const concurrent = annotatedValue<number>(item.performance?.max_concurrent);
             const decode = annotatedValue<number>(item.performance?.decode?.cluster_tokens_per_sec);
             const prefill = annotatedValue<number>(item.performance?.prefill?.latency_ms);
+            const perUserTps = decode && concurrent ? decode / concurrent : decode;
             return (
               <tr key={item.hardware?.id ?? item.generated_command?.command}>
                 <td>{item.hardware?.id ?? '-'}</td>
-                <td>{item.hardware?.memory_gb ? `${item.hardware.memory_gb}GB` : '-'}</td>
                 <td>{option?.gpu_count ? `${option.gpu_count} 张` : '-'}</td>
-                <td>{formatNumber(concurrent)}</td>
-                <td>{`${formatFloat(decode, 1)} tok/s`}</td>
+                <td>{item.hardware?.memory_gb ? `${item.hardware.memory_gb}GB` : '-'}</td>
                 <td>{formatMs(prefill)}</td>
+                <td>{`${formatFloat(perUserTps, 1)} tok/s`}</td>
+                <td>{`${formatFloat(decode, 0)} tok/s`}</td>
+                <td>{item.hardware?.memory_bandwidth_gbps ? `${item.hardware.memory_bandwidth_gbps} GB/s` : '-'}</td>
                 <td>
                   <span className={option?.fits ? 'fitText' : 'missText'}>{option?.fits ? '可行' : '不足'}</span>
                 </td>
@@ -726,6 +903,53 @@ function ComparisonTable({ reports }: { reports: Report[] }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function FormulaReference({ report, form, activeParams }: { report: Report | null; form: EvaluateForm; activeParams?: number }) {
+  const params = annotatedValue<number>(report?.weights?.params_estimated);
+  const weight = annotatedValue<number>(report?.weights?.safetensors_total_bytes);
+  const kv = report?.kv_cache_by_context?.at(-1);
+  const activation = report?.activation_by_context?.at(-1);
+  const isMoe = !!params && !!activeParams && activeParams < params;
+  const kvBits = report?.inference_options?.kv_cache_bits ?? Number(form.kv_cache_bits || 16);
+  const paged = report?.inference_options?.paged_attention ?? form.paged_attention;
+
+  return (
+    <div className="formulaList">
+      <details open>
+        <summary>Model Weights VRAM</summary>
+        <pre>
+{`weights = safetensors_total_bytes
+${weight ? `observed = ${formatBytes(weight)}` : 'observed = waiting for report'}
+${isMoe ? 'MoE: all expert weights stay resident in VRAM.' : 'Dense: all weights participate in memory and compute.'}`}
+        </pre>
+      </details>
+      <details open>
+        <summary>KV Cache VRAM</summary>
+        <pre>
+{`kv = architecture_kv_shape * seq_len * layers * ${kvBits} bits
+${paged ? 'paged_attention factor = 0.75' : 'paged_attention factor = 1.00'}
+${kv?.bytes?.value ? `selected = ${formatBytes(kv.bytes.value)}` : 'selected = waiting for report'}`}
+        </pre>
+      </details>
+      <details>
+        <summary>Activations</summary>
+        <pre>
+{`activation ~= seq_len * hidden_size * 2B
+${isMoe ? 'MoE routing factor is included.' : 'Dense activation estimate.'}
+${activation?.bytes?.value ? `selected = ${formatBytes(activation.bytes.value)}` : 'selected = waiting for report'}`}
+        </pre>
+      </details>
+      <details>
+        <summary>TTFT / Tokens Per Second</summary>
+        <pre>
+{`ttft_flops = 2 * ${isMoe ? 'active_params' : 'params'} * input_tokens
+decode_tps = effective_bandwidth / active_weight_bytes_per_gpu
+${isMoe ? `MoE active params = ${formatNumber(activeParams)} / total ${formatNumber(params)}` : ''}`}
+        </pre>
+      </details>
     </div>
   );
 }

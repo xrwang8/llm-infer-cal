@@ -8,6 +8,14 @@ pub fn compute_kv_cache_bytes(
     seq_len: u64,
     dtype_bytes: u64,
 ) -> AnnotatedValue<u64> {
+    compute_kv_cache_bits(profile, seq_len, dtype_bytes.saturating_mul(8))
+}
+
+pub fn compute_kv_cache_bits(
+    profile: &ArchitectureProfile,
+    seq_len: u64,
+    dtype_bits: u64,
+) -> AnnotatedValue<u64> {
     if seq_len == 0 {
         return AnnotatedValue::new(0, Label::Estimated, Some("seq_len <= 0"));
     }
@@ -55,16 +63,16 @@ pub fn compute_kv_cache_bytes(
         }
     }
 
-    let per_layer_per_token = per_layer_per_token_bytes(attention, dtype_bytes);
-    let baseline = per_layer_per_token * effective_seq * profile.num_hidden_layers;
-    let mut result_bytes = baseline;
+    let per_layer_per_token = per_layer_per_token_bits(attention, dtype_bits);
+    let baseline_bits = per_layer_per_token * effective_seq * profile.num_hidden_layers;
+    let mut scale = 1.0;
     let mut variant_note = attention.variant.as_str().to_string();
 
     if attention.variant == AttentionVariant::CsaHca {
         if let Some(compress_ratios) = &attention.compress_ratios {
             if !compress_ratios.is_empty() {
                 let ratio = average_csa_hca_ratio(compress_ratios);
-                result_bytes = (baseline as f64 * ratio) as u64;
+                scale = ratio;
                 variant_note = format!("{variant_note} (avg compress ratio {ratio:.3})");
             }
         }
@@ -74,33 +82,39 @@ pub fn compute_kv_cache_bytes(
         if let Some(nsa_topk) = attention.nsa_topk {
             if nsa_topk > 0 {
                 let sparsity = (nsa_topk as f64 / effective_seq as f64).min(1.0);
-                result_bytes = (baseline as f64 * sparsity) as u64;
+                scale = sparsity;
                 variant_note =
                     format!("{variant_note} (nsa_topk={nsa_topk}, sparsity={sparsity:.3})");
             }
         }
     }
 
+    let result_bytes = if dtype_bits % 8 == 0 {
+        ((baseline_bits / 8) as f64 * scale) as u64
+    } else {
+        ceil_div((baseline_bits as f64 * scale) as u64, 8)
+    };
+
     AnnotatedValue::new(
         result_bytes,
         Label::Estimated,
         Some(&format!(
-            "{variant_note}: 2*kv_shape*{dtype_bytes}B*{effective_seq}*{}{sliding_note}",
+            "{variant_note}: 2*kv_shape*{dtype_bits}b*{effective_seq}*{}{sliding_note}",
             profile.num_hidden_layers
         )),
     )
 }
 
-fn per_layer_per_token_bytes(attention: &AttentionTraits, dtype_bytes: u64) -> u64 {
+fn per_layer_per_token_bits(attention: &AttentionTraits, dtype_bits: u64) -> u64 {
     if attention.variant == AttentionVariant::Mla {
         if let Some(kv_lora_rank) = attention.kv_lora_rank {
             if kv_lora_rank > 0 {
-                return (kv_lora_rank + attention.qk_rope_head_dim.unwrap_or(0)) * dtype_bytes;
+                return (kv_lora_rank + attention.qk_rope_head_dim.unwrap_or(0)) * dtype_bits;
             }
         }
     }
 
-    2 * attention.num_kv_heads * attention.head_dim * dtype_bytes
+    2 * attention.num_kv_heads * attention.head_dim * dtype_bits
 }
 
 fn average_csa_hca_ratio(compress_ratios: &[u64]) -> f64 {
@@ -113,4 +127,11 @@ fn average_csa_hca_ratio(compress_ratios: &[u64]) -> f64 {
         .map(|&ratio| if ratio == 0 { 1.0 } else { 1.0 / ratio as f64 })
         .sum::<f64>();
     total_fraction / compress_ratios.len() as f64
+}
+
+fn ceil_div(value: u64, divisor: u64) -> u64 {
+    if divisor == 0 {
+        return value;
+    }
+    value.div_ceil(divisor)
 }

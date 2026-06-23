@@ -1,7 +1,7 @@
 use llm_infer_cal_core::architecture::profile::{
     ArchitectureProfile, AttentionTraits, AttentionVariant, Confidence, Family, MoeTraits,
 };
-use llm_infer_cal_core::fleet::planner::{kv_shards, plan};
+use llm_infer_cal_core::fleet::planner::{kv_shards, plan, plan_with_activation};
 use llm_infer_cal_core::hardware::loader::{lookup, GPUSpec};
 use llm_infer_cal_core::output::labels::{AnnotatedValue, Label};
 use llm_infer_cal_core::performance::compute::{
@@ -236,6 +236,46 @@ fn fleet_planner_flags_forced_invalid_count_and_shards_gqa_kv() {
         .unwrap();
     let ctx_128k = prod.max_concurrent_by_context[0].1;
     assert!(ctx_128k > 30);
+}
+
+#[test]
+fn fleet_planner_counts_activation_memory_in_required_bytes() {
+    let h100 = lookup("H100").unwrap();
+
+    let without_activation = plan(
+        &llama_profile(),
+        10_000_000_000,
+        10_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 10_000_000_000)],
+    );
+    let with_activation = plan_with_activation(
+        &llama_profile(),
+        10_000_000_000,
+        10_000_000_000,
+        5_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 10_000_000_000)],
+        &[(131_072, 5_000_000_000)],
+    );
+
+    let plain = &without_activation.options[0];
+    let activated = &with_activation.options[0];
+
+    assert_eq!(plain.max_concurrent_at_reference_ctx, 6);
+    assert_eq!(activated.max_concurrent_at_reference_ctx, 4);
+    assert_eq!(activated.tier_concurrent_requests, 8);
+    assert_eq!(activated.kv_bytes_per_request_per_gpu, 10_000_000_000);
+    assert_eq!(activated.activation_bytes_per_request, 5_000_000_000);
+    assert_eq!(
+        activated.required_bytes_per_gpu_at_tier,
+        10_000_000_000 + 8 * (10_000_000_000 + 5_000_000_000)
+    );
+    assert!(activated.required_bytes_per_gpu_at_tier > plain.required_bytes_per_gpu_at_tier);
 }
 
 #[test]

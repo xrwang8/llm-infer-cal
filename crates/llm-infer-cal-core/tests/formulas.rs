@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use llm_infer_cal_core::architecture::formulas::kv_cache::compute_kv_cache_bytes;
+use llm_infer_cal_core::architecture::formulas::kv_cache::{
+    compute_kv_cache_bits, compute_kv_cache_bytes,
+};
 use llm_infer_cal_core::architecture::formulas::weight::{
-    estimate_total_params, predicted_bytes_under_quant,
+    estimate_active_params, estimate_total_params, predicted_bytes_under_quant,
 };
 use llm_infer_cal_core::architecture::profile::{
     ArchitectureProfile, AttentionTraits, AttentionVariant, Confidence, Family, MoeTraits,
@@ -51,6 +53,20 @@ fn standard_gqa_kv_formula_matches_rust_contract() {
     let expected = 2_u64 * 8 * 128 * 2 * 2048 * 80;
     assert_eq!(kv.value, expected);
     assert_eq!(kv.label, Label::Estimated);
+}
+
+#[test]
+fn kv_cache_bits_precision_scales_cache_size() {
+    let profile = base_profile(Some(gqa_attention()));
+
+    let fp16 = compute_kv_cache_bits(&profile, 2048, 16);
+    let fp8 = compute_kv_cache_bits(&profile, 2048, 8);
+    let int4 = compute_kv_cache_bits(&profile, 2048, 4);
+
+    assert_eq!(fp16.value, compute_kv_cache_bytes(&profile, 2048, 2).value);
+    assert_eq!(fp8.value, fp16.value / 2);
+    assert_eq!(int4.value, fp16.value / 4);
+    assert!(fp8.source.as_deref().unwrap_or("").contains("8b"));
 }
 
 #[test]
@@ -230,9 +246,12 @@ fn dense_weight_estimate_uses_rust_formula() {
     profile.intermediate_size = Some(64);
 
     let params = estimate_total_params(&profile);
+    let active = estimate_active_params(&profile);
 
     assert_eq!(params.value, 12_480);
     assert_eq!(params.label, Label::Estimated);
+    assert_eq!(active.value, params.value);
+    assert_eq!(active.label, Label::Estimated);
 }
 
 #[test]
@@ -249,9 +268,13 @@ fn moe_weight_estimate_counts_all_experts() {
     });
 
     let params = estimate_total_params(&profile);
+    let active = estimate_active_params(&profile);
 
     assert_eq!(params.value, 18_752);
     assert_eq!(params.label, Label::Estimated);
+    assert_eq!(active.value, 12_608);
+    assert!(active.value < params.value);
+    assert!(active.source.as_deref().unwrap_or("").contains("active"));
 }
 
 #[test]
