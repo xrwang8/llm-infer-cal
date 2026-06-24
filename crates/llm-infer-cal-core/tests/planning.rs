@@ -74,6 +74,37 @@ fn deepseek_v4_profile() -> ArchitectureProfile {
     }
 }
 
+fn deepseek_v4_pro_profile() -> ArchitectureProfile {
+    ArchitectureProfile {
+        model_type: "deepseek_v4".to_string(),
+        architectures: vec!["deepseekv4forcausallm".to_string()],
+        family: Family::Transformer,
+        num_hidden_layers: 61,
+        hidden_size: 7168,
+        vocab_size: 129_280,
+        confidence: Confidence::High,
+        attention: Some(AttentionTraits {
+            variant: AttentionVariant::CsaHca,
+            num_heads: 128,
+            num_kv_heads: 1,
+            head_dim: 512,
+            q_lora_rank: Some(1536),
+            kv_lora_rank: None,
+            qk_rope_head_dim: Some(64),
+            compress_ratios: Some([vec![128, 128], [4, 128].repeat(29), vec![4, 128]].concat()),
+            nsa_topk: None,
+        }),
+        moe: Some(MoeTraits {
+            num_routed_experts: 384,
+            num_shared_experts: 1,
+            num_experts_per_tok: 6,
+            moe_intermediate_size: 3072,
+        }),
+        sliding_window: Some(128),
+        ..ArchitectureProfile::default()
+    }
+}
+
 fn llama_profile() -> ArchitectureProfile {
     ArchitectureProfile {
         model_type: "llama".to_string(),
@@ -316,14 +347,35 @@ fn fleet_planner_counts_activation_memory_in_required_bytes() {
 
     assert_eq!(plain.max_concurrent_at_reference_ctx, 6);
     assert_eq!(activated.max_concurrent_at_reference_ctx, 5);
-    assert_eq!(activated.tier_concurrent_requests, 8);
+    assert_eq!(activated.tier_concurrent_requests, 1);
     assert_eq!(activated.kv_bytes_per_request_per_gpu, 10_000_000_000);
     assert_eq!(activated.activation_bytes_per_request, 5_000_000_000);
     assert_eq!(
         activated.required_bytes_per_gpu_at_tier,
-        10_000_000_000 + 5_000_000_000 + 8 * 10_000_000_000
+        10_000_000_000 + 5_000_000_000 + 10_000_000_000
     );
     assert!(activated.required_bytes_per_gpu_at_tier > plain.required_bytes_per_gpu_at_tier);
+}
+
+#[test]
+fn forced_gpu_count_uses_minimal_launch_concurrency_by_default() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan(
+        &llama_profile(),
+        60_000_000_000,
+        2_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 2_000_000_000)],
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.tier, "min");
+    assert_eq!(option.gpu_count, 1);
+    assert_eq!(option.tier_concurrent_requests, 1);
+    assert!(option.fits);
+    assert_eq!(rec.best_tier, Some("min"));
 }
 
 #[test]
@@ -450,6 +502,146 @@ fn fleet_planner_recommends_multinode_for_glm52_bf16_on_h100() {
     assert_eq!(best.pipeline_parallel_size, 6);
     assert_eq!(best.node_count, 6);
     assert!(best.fits);
+}
+
+#[test]
+fn fleet_planner_recommends_multinode_tp_when_layers_do_not_divide_pp() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_activation(
+        &deepseek_v4_pro_profile(),
+        864_721_029_744,
+        541_139_736,
+        59_179_008,
+        40_960,
+        &h100,
+        None,
+        &[(40_960, 541_139_736)],
+        &[(40_960, 59_179_008)],
+    );
+
+    assert_eq!(rec.best_tier, Some("dev"));
+    let best = rec.best_option().unwrap();
+    assert_eq!(best.gpu_count, 16);
+    assert_eq!(best.tensor_parallel_size, 16);
+    assert_eq!(best.pipeline_parallel_size, 1);
+    assert_eq!(best.node_count, 2);
+    assert!(best.fits);
+    assert!(best.required_bytes_per_gpu_at_tier <= best.usable_bytes_per_gpu);
+}
+
+#[test]
+fn fleet_planner_prefill_peak_can_prevent_fit() {
+    let h100 = lookup("H100").unwrap();
+    let profile = llama_profile();
+    let weight_bytes = 10_000_000_000;
+    let kv_bytes = 100_000_000;
+    let activation_bytes = 35_000_000_000;
+
+    let target = plan_with_memory_options(
+        &profile,
+        weight_bytes,
+        kv_bytes,
+        activation_bytes,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, kv_bytes)],
+        &[(131_072, activation_bytes)],
+        FleetMemoryOptions {
+            target_concurrent_requests: Some(128),
+            ..FleetMemoryOptions::default()
+        },
+    );
+
+    let option = &target.options[0];
+    assert!(!option.fits);
+    assert!(option.reason_en.to_lowercase().contains("exceed"));
+}
+
+#[test]
+fn fleet_planner_prefill_peak_counts_concurrent_kv_cache() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_memory_options(
+        &llama_profile(),
+        10_000_000_000,
+        1_000_000_000,
+        40_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 1_000_000_000)],
+        &[(131_072, 40_000_000_000)],
+        FleetMemoryOptions {
+            target_concurrent_requests: Some(16),
+            ..FleetMemoryOptions::default()
+        },
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.required_bytes_per_gpu_at_tier, 84_593_750_000);
+    assert!(!option.fits);
+}
+
+#[test]
+fn fleet_planner_prefill_peak_handles_extreme_concurrency_without_overflow() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_memory_options(
+        &llama_profile(),
+        1,
+        1,
+        1,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 1)],
+        &[(131_072, 1)],
+        FleetMemoryOptions {
+            target_concurrent_requests: Some(u64::MAX),
+            ..FleetMemoryOptions::default()
+        },
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.required_bytes_per_gpu_at_tier, u64::MAX);
+    assert!(!option.fits);
+}
+
+#[test]
+fn fleet_planner_max_concurrent_is_capped_by_prefill_peak() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_activation(
+        &llama_profile(),
+        10_000_000_000,
+        1_000_000_000,
+        40_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 1_000_000_000)],
+        &[(131_072, 40_000_000_000)],
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.max_concurrent_at_reference_ctx, 15);
+    assert_eq!(option.max_concurrent_by_context, vec![(131_072, 15)]);
+}
+
+#[test]
+fn fleet_planner_prefill_peak_does_not_break_simple_fit() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_activation(
+        &llama_profile(),
+        10_000_000_000,
+        1_000_000_000,
+        5_000_000_000,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 1_000_000_000)],
+        &[(131_072, 5_000_000_000)],
+    );
+
+    assert!(rec.options[0].fits);
 }
 
 #[test]

@@ -920,6 +920,9 @@ fn fleet_json(report: &EvaluationReport) -> Value {
                 "activation_bytes_per_request_per_gpu": option.activation_bytes_per_request_per_gpu,
                 "kv_reference_context_tokens": option.kv_reference_context_tokens,
                 "tier_concurrent_requests": option.tier_concurrent_requests,
+                "decode_required_bytes_per_gpu_at_tier": option.decode_required_bytes_per_gpu_at_tier,
+                "prefill_activation_bytes_per_gpu_at_tier": option.prefill_activation_bytes_per_gpu_at_tier,
+                "prefill_required_bytes_per_gpu_at_tier": option.prefill_required_bytes_per_gpu_at_tier,
                 "required_bytes_per_gpu_at_tier": option.required_bytes_per_gpu_at_tier,
                 "max_concurrent_at_reference_ctx": option.max_concurrent_at_reference_ctx,
                 "max_concurrent_by_context": option.max_concurrent_by_context.iter().map(|(ctx, count)| {

@@ -23,10 +23,14 @@ step. The file sizes are the bytes you download with the model weights.
 **Formula**:
 ```
 activation_bytes = max_num_batched_tokens × hidden_size × dtype_bytes × activation_factor
+moe_activation_correction = 1 + active_experts / total_experts * 0.5
+activation_bytes_moe = activation_bytes × moe_activation_correction
 ```
 
 Default `max_num_batched_tokens` is `2048`, `dtype_bytes` is `2`, and
-`activation_factor` is `2`.
+`activation_factor` is `2`. Dense models use a correction factor of `1.0`.
+MoE models apply the routed-expert correction above, matching
+`crates/llm-infer-cal-core/src/architecture/formulas/activation.rs`.
 
 **Planner use**: activation is charged **once per engine/GPU layout**, after
 TP sharding by hidden dimension. It is not multiplied by request concurrency.
@@ -43,21 +47,30 @@ SGLang exposes the same tuning shape via `--chunked-prefill-size` /
 **Formula (standard attention)**:
 ```
 per_token_per_layer_bytes = 2 × num_kv_heads × head_dim × dtype_bytes
-total_bytes = per_token_per_layer_bytes × seq_len × num_layers
+effective_seq_len = sliding_window ? min(seq_len, sliding_window) : seq_len
+raw_bytes = per_token_per_layer_bytes × effective_seq_len × num_layers
 ```
 
 **Formula (MLA)**:
 ```
 per_token_per_layer_bytes = (kv_lora_rank + qk_rope_head_dim) × dtype_bytes
-total_bytes = per_token_per_layer_bytes × seq_len × num_layers
+raw_bytes = per_token_per_layer_bytes × seq_len × num_layers
 ```
 
 The `kv_lora_rank` part is the compressed latent KV. `qk_rope_head_dim` covers
 the decoupled RoPE key dimension used by MLA-style models that expose it in
 config.
 
-**Formula (CSA+HCA / NSA)**: baseline × per-layer compression factor from
-`compress_ratios` array.
+**Formula (CSA+HCA / NSA)**:
+```
+CSA+HCA raw_bytes = baseline × avg(1 / compress_ratio)
+NSA raw_bytes = baseline × min(nsa_topk / effective_seq_len, 1.0)
+paged_attention_factor = 0.75   # when paged attention is enabled, else 1.00
+total_bytes = raw_bytes × paged_attention_factor
+```
+
+Sliding-window capping applies to non-sparse attention variants. CSA+HCA and
+NSA apply their sparse reductions after the baseline formula.
 
 **Label**: `[estimated]` — depends on exact runtime behavior (e.g. KV
 quantization) that may differ from the baseline assumption.
@@ -93,9 +106,17 @@ then searches larger valid layouts such as `TP8 × PP6`.
 ```
 reserved_per_gpu = max(3GB, 10% × HBM)
 usable_per_gpu = HBM - reserved_per_gpu
-needed_per_gpu = resident_weight_per_gpu
-               + activation_working_set_per_gpu
-               + concurrent_requests × per_gpu_KV
+concurrent_KV = concurrent_requests × per_gpu_KV
+decode_required = resident_weight_per_gpu
+                + decode_activation_per_gpu
+                + concurrent_KV
+prefill_active_requests = max(concurrent_requests / 8, 1)
+prefill_tokens = prefill_active_requests × 1500
+prefill_peak_activation = activation_working_set × prefill_tokens / 2048
+prefill_required = resident_weight_per_gpu
+                 + prefill_peak_activation_per_gpu
+                 + concurrent_KV
+required_per_gpu = max(decode_required, prefill_required)
 ```
 
 The 10% reserve matches `--gpu-memory-utilization 0.9` / SGLang

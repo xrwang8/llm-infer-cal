@@ -1,3 +1,4 @@
+use crate::architecture::formulas::activation::DEFAULT_BATCHED_TOKENS;
 use crate::architecture::formulas::weight::estimate_total_params;
 use crate::architecture::profile::{ArchitectureProfile, AttentionVariant};
 use crate::hardware::loader::GPUSpec;
@@ -5,7 +6,13 @@ use crate::hardware::loader::GPUSpec;
 const OVERHEAD_FRACTION: f64 = 0.10;
 const OVERHEAD_FLOOR_BYTES: u64 = 3_000_000_000;
 const MAX_TP_SINGLE_NODE: u64 = 8;
+const MAX_DISTRIBUTED_TP: u64 = 64;
 const MAX_PIPELINE_PARALLEL: u64 = 8;
+// Prefill peak heuristic: while decode KV for all concurrent requests remains
+// resident, one eighth of those requests are active in a 1500-token chunked
+// prefill step. Mirrors the Python implementation.
+const PREFILL_ACTIVE_REQUEST_DIVISOR: u64 = 8;
+const PREFILL_CHUNK_TOKENS_PER_ACTIVE_REQUEST: u64 = 1500;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FleetOption {
@@ -24,6 +31,9 @@ pub struct FleetOption {
     pub activation_bytes_per_request_per_gpu: u64,
     pub kv_reference_context_tokens: u64,
     pub tier_concurrent_requests: u64,
+    pub decode_required_bytes_per_gpu_at_tier: u64,
+    pub prefill_activation_bytes_per_gpu_at_tier: u64,
+    pub prefill_required_bytes_per_gpu_at_tier: u64,
     pub required_bytes_per_gpu_at_tier: u64,
     pub max_concurrent_at_reference_ctx: u64,
     pub max_concurrent_by_context: Vec<(u64, u64)>,
@@ -95,6 +105,7 @@ pub fn plan(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn plan_with_activation(
     profile: &ArchitectureProfile,
     weight_bytes: u64,
@@ -120,6 +131,7 @@ pub fn plan_with_activation(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn plan_with_memory_options(
     profile: &ArchitectureProfile,
     weight_bytes: u64,
@@ -158,7 +170,7 @@ pub fn plan_with_memory_options(
         let tier = if memory_options.target_concurrent_requests.is_some() {
             "target"
         } else {
-            "dev"
+            "min"
         };
         let option = evaluate_count(forced_gpu_count, tier, &eval);
         let best_tier = option.fits.then_some(tier);
@@ -183,16 +195,7 @@ pub fn plan_with_memory_options(
     };
     let mut options = Vec::new();
     for (tier, concurrent) in tiers {
-        let gpu_count = smallest_fitting_count(
-            &candidates,
-            profile,
-            weight_bytes,
-            kv_bytes_per_request_at_ref,
-            activation_bytes_per_request_at_ref,
-            usable_per_gpu,
-            *concurrent,
-            memory_options,
-        );
+        let gpu_count = smallest_fitting_count(&candidates, &eval, *concurrent);
         let chosen = gpu_count.unwrap_or_else(|| *candidates.iter().max().unwrap_or(&1));
         options.push(evaluate_count(chosen, tier, &eval));
     }
@@ -238,6 +241,7 @@ pub fn valid_tp_sizes(profile: &ArchitectureProfile) -> Vec<u64> {
 
 fn candidate_gpu_counts(profile: &ArchitectureProfile, valid_tp: &[u64]) -> Vec<u64> {
     let mut candidates = valid_tp.to_vec();
+    candidates.extend(distributed_tp_sizes(profile));
     let max_tp = valid_tp.iter().copied().max().unwrap_or(1);
     if max_tp > 0 {
         let layers = profile.num_hidden_layers;
@@ -258,8 +262,24 @@ fn layout_for_count(profile: &ArchitectureProfile, gpu_count: u64) -> (u64, u64,
     if gpu_count <= max_tp {
         return (gpu_count.max(1), 1, 1);
     }
+    if distributed_tp_sizes(profile).contains(&gpu_count) {
+        return (gpu_count, 1, ceil_div(gpu_count, MAX_TP_SINGLE_NODE).max(1));
+    }
     let pp = ceil_div(gpu_count, max_tp).max(1);
     (max_tp, pp, pp)
+}
+
+fn distributed_tp_sizes(profile: &ArchitectureProfile) -> Vec<u64> {
+    let Some(attention) = &profile.attention else {
+        return Vec::new();
+    };
+    if attention.num_heads <= MAX_TP_SINGLE_NODE {
+        return Vec::new();
+    }
+    let cap = attention.num_heads.min(MAX_DISTRIBUTED_TP);
+    (MAX_TP_SINGLE_NODE + 1..=cap)
+        .filter(|candidate| attention.num_heads % candidate == 0)
+        .collect()
 }
 
 pub fn kv_shards(profile: &ArchitectureProfile, tp_size: u64) -> u64 {
@@ -280,45 +300,36 @@ pub fn effective_kv_shards(profile: &ArchitectureProfile, gpu_count: u64) -> u64
 
 fn smallest_fitting_count(
     candidates: &[u64],
-    profile: &ArchitectureProfile,
-    weight_bytes: u64,
-    kv_bytes: u64,
-    activation_bytes: u64,
-    usable_per_gpu: u64,
+    eval: &EvalContext<'_>,
     concurrent: u64,
-    memory_options: FleetMemoryOptions,
 ) -> Option<u64> {
-    candidates.iter().copied().find(|count| {
-        fits(
-            *count,
-            profile,
-            weight_bytes,
-            kv_bytes,
-            activation_bytes,
-            usable_per_gpu,
-            concurrent,
-            memory_options,
-        )
-    })
+    candidates
+        .iter()
+        .copied()
+        .find(|count| fits(*count, eval, concurrent))
 }
 
-fn fits(
-    gpu_count: u64,
-    profile: &ArchitectureProfile,
-    weight_bytes: u64,
-    kv_bytes: u64,
-    activation_bytes: u64,
-    usable_per_gpu: u64,
-    concurrent: u64,
-    memory_options: FleetMemoryOptions,
-) -> bool {
-    let weight_per_gpu =
-        resident_weight_per_gpu(profile, weight_bytes, gpu_count, memory_options).total;
-    let shards = effective_kv_shards(profile, gpu_count);
-    let kv_per_gpu = ceil_div(kv_bytes, shards);
-    let activation_per_gpu = ceil_div(activation_bytes, activation_shards(profile, gpu_count));
-    let needed = weight_per_gpu + activation_per_gpu + concurrent * kv_per_gpu;
-    needed <= usable_per_gpu
+fn fits(gpu_count: u64, eval: &EvalContext<'_>, concurrent: u64) -> bool {
+    let weight_per_gpu = resident_weight_per_gpu(
+        eval.profile,
+        eval.weight_bytes,
+        gpu_count,
+        eval.memory_options,
+    )
+    .total;
+    let shards = effective_kv_shards(eval.profile, gpu_count);
+    let kv_per_gpu = ceil_div(eval.kv_bytes, shards);
+    let act_shards = activation_shards(eval.profile, gpu_count);
+    let activation_per_gpu = ceil_div(eval.activation_bytes, act_shards);
+    let required = peak_memory_per_gpu(
+        weight_per_gpu,
+        activation_per_gpu,
+        eval.activation_bytes,
+        act_shards,
+        kv_per_gpu,
+        concurrent,
+    );
+    required.required <= eval.usable_per_gpu as u128
 }
 
 fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) -> FleetOption {
@@ -332,29 +343,29 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     );
     let shards = effective_kv_shards(eval.profile, gpu_count);
     let kv_per_gpu = ceil_div(eval.kv_bytes, shards);
-    let activation_per_gpu = ceil_div(
+    let act_shards = activation_shards(eval.profile, gpu_count);
+    let activation_per_gpu = ceil_div(eval.activation_bytes, act_shards);
+    let max_concurrent = max_concurrent_for_kv(
+        weight.total,
         eval.activation_bytes,
-        activation_shards(eval.profile, gpu_count),
+        activation_per_gpu,
+        act_shards,
+        kv_per_gpu,
+        eval.usable_per_gpu,
     );
-    let headroom = eval
-        .usable_per_gpu
-        .saturating_sub(weight.total)
-        .saturating_sub(activation_per_gpu);
-    let max_concurrent = if kv_per_gpu > 0 {
-        headroom.checked_div(kv_per_gpu).unwrap_or(0)
-    } else {
-        0
-    };
     let mut max_concurrent_by_context = eval
         .kv_by_context
         .iter()
         .map(|(ctx, kv)| {
             let kv_per_gpu = ceil_div(*kv, shards);
-            let concurrent = if kv_per_gpu > 0 {
-                headroom.checked_div(kv_per_gpu).unwrap_or(0)
-            } else {
-                0
-            };
+            let concurrent = max_concurrent_for_kv(
+                weight.total,
+                eval.activation_bytes,
+                activation_per_gpu,
+                act_shards,
+                kv_per_gpu,
+                eval.usable_per_gpu,
+            );
             (*ctx, concurrent)
         })
         .collect::<Vec<_>>();
@@ -367,18 +378,19 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         "prod" => 16,
         _ => 8,
     };
-    let required_bytes_per_gpu_at_tier =
-        weight.total + activation_per_gpu + tier_concurrent * kv_per_gpu;
-    let fits = fits(
-        gpu_count,
-        eval.profile,
-        eval.weight_bytes,
-        eval.kv_bytes,
+    let peak = peak_memory_per_gpu(
+        weight.total,
+        activation_per_gpu,
         eval.activation_bytes,
-        eval.usable_per_gpu,
+        act_shards,
+        kv_per_gpu,
         tier_concurrent,
-        eval.memory_options,
     );
+    let decode_required_bytes_per_gpu_at_tier = saturating_u128_to_u64(peak.decode_required);
+    let prefill_activation_bytes_per_gpu_at_tier = saturating_u128_to_u64(peak.prefill_activation);
+    let prefill_required_bytes_per_gpu_at_tier = saturating_u128_to_u64(peak.prefill_required);
+    let required_bytes_per_gpu_at_tier = saturating_u128_to_u64(peak.required);
+    let fits = fits(gpu_count, eval, tier_concurrent);
 
     let layout_en = if pipeline_parallel_size > 1 {
         format!("TP{tensor_parallel_size}xPP{pipeline_parallel_size}, {node_count} nodes")
@@ -405,11 +417,11 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     } else if !fits {
         (
             format!(
-                "Weights + activation + {tier_concurrent}x KV would exceed {:.1} GB usable per GPU",
+                "Weights + prefill peak activation + {tier_concurrent}x KV would exceed {:.1} GB usable per GPU",
                 eval.usable_per_gpu as f64 / 1e9
             ),
             format!(
-                "权重 + Activation + {tier_concurrent} 份 KV 超过单卡可用的 {:.1} GB",
+                "权重 + Prefill 峰值 Activation + {tier_concurrent} 份 KV 超过单卡可用的 {:.1} GB",
                 eval.usable_per_gpu as f64 / 1e9
             ),
         )
@@ -442,6 +454,9 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         activation_bytes_per_request_per_gpu: activation_per_gpu,
         kv_reference_context_tokens: eval.reference_context_tokens,
         tier_concurrent_requests: tier_concurrent,
+        decode_required_bytes_per_gpu_at_tier,
+        prefill_activation_bytes_per_gpu_at_tier,
+        prefill_required_bytes_per_gpu_at_tier,
         required_bytes_per_gpu_at_tier,
         max_concurrent_at_reference_ctx: max_concurrent,
         max_concurrent_by_context,
@@ -460,6 +475,13 @@ struct ResidentWeight {
     speculative: u64,
     cpu_offload: u64,
     total: u64,
+}
+
+struct PeakMemory {
+    decode_required: u128,
+    prefill_activation: u128,
+    prefill_required: u128,
+    required: u128,
 }
 
 fn resident_weight_per_gpu(
@@ -532,6 +554,73 @@ fn activation_shards(profile: &ArchitectureProfile, gpu_count: u64) -> u64 {
     tp.max(1)
 }
 
+fn peak_memory_per_gpu(
+    weight_per_gpu: u64,
+    activation_per_gpu: u64,
+    activation_bytes: u64,
+    act_shards: u64,
+    kv_per_gpu: u64,
+    concurrent: u64,
+) -> PeakMemory {
+    let concurrent_kv = concurrent as u128 * kv_per_gpu as u128;
+    let decode_required = weight_per_gpu as u128 + activation_per_gpu as u128 + concurrent_kv;
+    let prefill_activation = prefill_activation_per_gpu(activation_bytes, act_shards, concurrent);
+    let prefill_required = weight_per_gpu as u128 + prefill_activation + concurrent_kv;
+    let required = decode_required.max(prefill_required);
+    PeakMemory {
+        decode_required,
+        prefill_activation,
+        prefill_required,
+        required,
+    }
+}
+
+fn prefill_activation_per_gpu(activation_bytes: u64, act_shards: u64, concurrent: u64) -> u128 {
+    let active_prefill_requests = (concurrent / PREFILL_ACTIVE_REQUEST_DIVISOR).max(1);
+    let prefill_tokens =
+        active_prefill_requests as u128 * PREFILL_CHUNK_TOKENS_PER_ACTIVE_REQUEST as u128;
+    let total_prefill_activation =
+        activation_bytes as u128 * prefill_tokens / DEFAULT_BATCHED_TOKENS as u128;
+    ceil_div_u128(total_prefill_activation, act_shards.max(1) as u128)
+}
+
+fn max_concurrent_for_kv(
+    weight_per_gpu: u64,
+    activation_bytes: u64,
+    activation_per_gpu: u64,
+    act_shards: u64,
+    kv_per_gpu: u64,
+    usable_per_gpu: u64,
+) -> u64 {
+    if kv_per_gpu == 0 {
+        return 0;
+    }
+
+    let decode_headroom = usable_per_gpu
+        .saturating_sub(weight_per_gpu)
+        .saturating_sub(activation_per_gpu);
+    let decode_bound = decode_headroom / kv_per_gpu;
+    let mut low = 0;
+    let mut high = decode_bound;
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        let required = peak_memory_per_gpu(
+            weight_per_gpu,
+            activation_per_gpu,
+            activation_bytes,
+            act_shards,
+            kv_per_gpu,
+            mid,
+        );
+        if required.required <= usable_per_gpu as u128 {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    low
+}
+
 fn fmt_context(tokens: u64) -> String {
     if tokens >= 1_000_000 {
         if tokens % 1_000_000 == 0 {
@@ -552,22 +641,29 @@ fn constraint_note_en(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String
         .map(|attention| attention.num_heads)
         .unwrap_or(0);
     let candidates = candidate_gpu_counts(profile, valid_tp);
-    let multi_node = candidates
+    let distributed_tp = distributed_tp_sizes(profile);
+    let pipeline = candidates
         .iter()
         .copied()
-        .filter(|count| !valid_tp.contains(count))
+        .filter(|count| !valid_tp.contains(count) && !distributed_tp.contains(count))
         .collect::<Vec<_>>();
-    let multi_note = if multi_node.is_empty() {
+    let distributed_note = if distributed_tp.is_empty() {
+        String::new()
+    } else {
+        format!(" Cross-node TP candidates: {distributed_tp:?}.")
+    };
+    let pipeline_note = if pipeline.is_empty() {
         String::new()
     } else {
         format!(
-            " Multi-node candidates (TP{} x PP): {multi_node:?}.",
+            " Pipeline-parallel candidates (TP{} x PP): {pipeline:?}.",
             valid_tp.iter().max().unwrap_or(&1)
         )
     };
     format!(
         "TP must divide num_heads={heads}. Candidates within one node (<=8 GPUs): {valid_tp:?}."
-    ) + &multi_note
+    ) + &distributed_note
+        + &pipeline_note
 }
 
 fn constraint_note_zh(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String {
@@ -577,20 +673,28 @@ fn constraint_note_zh(profile: &ArchitectureProfile, valid_tp: &[u64]) -> String
         .map(|attention| attention.num_heads)
         .unwrap_or(0);
     let candidates = candidate_gpu_counts(profile, valid_tp);
-    let multi_node = candidates
+    let distributed_tp = distributed_tp_sizes(profile);
+    let pipeline = candidates
         .iter()
         .copied()
-        .filter(|count| !valid_tp.contains(count))
+        .filter(|count| !valid_tp.contains(count) && !distributed_tp.contains(count))
         .collect::<Vec<_>>();
-    let multi_note = if multi_node.is_empty() {
+    let distributed_note = if distributed_tp.is_empty() {
+        String::new()
+    } else {
+        format!(" 跨节点 TP 候选：{distributed_tp:?}。")
+    };
+    let pipeline_note = if pipeline.is_empty() {
         String::new()
     } else {
         format!(
-            " 单节点放不下时尝试多节点候选（TP{} × PP）：{multi_node:?}。",
+            " 单节点放不下时尝试流水并行候选（TP{} × PP）：{pipeline:?}。",
             valid_tp.iter().max().unwrap_or(&1)
         )
     };
-    format!("TP 张数必须整除 num_heads={heads}。单节点（≤8 卡）候选：{valid_tp:?}。") + &multi_note
+    format!("TP 张数必须整除 num_heads={heads}。单节点（≤8 卡）候选：{valid_tp:?}。")
+        + &distributed_note
+        + &pipeline_note
 }
 
 fn ceil_div(value: u64, divisor: u64) -> u64 {
@@ -598,4 +702,15 @@ fn ceil_div(value: u64, divisor: u64) -> u64 {
         return value;
     }
     value.div_ceil(divisor)
+}
+
+fn ceil_div_u128(value: u128, divisor: u128) -> u128 {
+    if divisor == 0 {
+        return value;
+    }
+    value.div_ceil(divisor)
+}
+
+fn saturating_u128_to_u64(value: u128) -> u64 {
+    value.min(u64::MAX as u128) as u64
 }

@@ -187,7 +187,7 @@ fn builtin_qwen36_model_renders_zh_report_without_network() {
     assert!(exit.stdout.contains("量化方案推断: BF16 [已验证]"));
     assert!(exit.stdout.contains("生成的启动命令"));
     assert!(exit.stdout.contains("--max-model-len 262144"));
-    assert!(exit.stdout.contains("--max-num-seqs 12"));
+    assert!(exit.stdout.contains("--max-num-seqs 25"));
     assert!(exit.stdout.contains("--trust-remote-code"));
     assert!(exit.stdout.contains("--enable-auto-tool-choice"));
     assert!(exit.stdout.contains("--tool-call-parser qwen3_xml"));
@@ -220,7 +220,7 @@ fn builtin_qwen36_sglang_command_includes_recipe_flags() {
     assert!(exit.stdout.contains("--reasoning-parser qwen3"));
     assert!(exit.stdout.contains("--tool-call-parser qwen3_coder"));
     assert!(exit.stdout.contains("--context-length 262144"));
-    assert!(exit.stdout.contains("--max-running-requests 12"));
+    assert!(exit.stdout.contains("--max-running-requests 25"));
     assert!(exit.stdout.contains("--speculative-algorithm EAGLE"));
     assert!(exit.stdout.contains("--speculative-num-steps 3"));
     assert!(exit.stdout.contains("--speculative-eagle-topk 1"));
@@ -273,7 +273,7 @@ fn builtin_qwen36_can_render_machine_readable_json() {
         json["fleet"]["options"][1]["kv_reference_context_tokens"],
         262_144
     );
-    assert_eq!(json["performance"]["max_concurrent"]["value"], 12);
+    assert_eq!(json["performance"]["max_concurrent"]["value"], 25);
     assert!(json["generated_command"]["command"]
         .as_str()
         .unwrap()
@@ -281,7 +281,7 @@ fn builtin_qwen36_can_render_machine_readable_json() {
     assert!(json["generated_command"]["command"]
         .as_str()
         .unwrap()
-        .contains("--max-num-seqs 12"));
+        .contains("--max-num-seqs 25"));
     assert_eq!(
         json["generated_command"]["lines"][0],
         "vllm serve Qwen/Qwen3.6-35B-A3B"

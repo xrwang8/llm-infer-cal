@@ -16,6 +16,9 @@ export type FleetOption = {
   activation_bytes_per_request_per_gpu?: number;
   kv_reference_context_tokens?: number;
   tier_concurrent_requests?: number;
+  decode_required_bytes_per_gpu_at_tier?: number;
+  prefill_activation_bytes_per_gpu_at_tier?: number;
+  prefill_required_bytes_per_gpu_at_tier?: number;
   required_bytes_per_gpu_at_tier?: number;
   max_concurrent_at_reference_ctx?: number;
   reason_zh?: string;
@@ -145,7 +148,7 @@ type PerformanceSettingKey =
   | 'decode_bw_utilization'
   | 'concurrency_degradation';
 
-type AdvancedNumberSettingKey = 'gpu_count' | 'target_concurrent_requests';
+type AdvancedNumberSettingKey = 'target_concurrent_requests';
 type AdvancedBooleanSettingKey = 'llm_review';
 type LlmReviewSettingKey = 'llm_review_api_key' | 'llm_review_base_url' | 'llm_review_model';
 
@@ -206,8 +209,6 @@ const PERFORMANCE_SETTINGS: PerformanceSetting[] = [
 ];
 
 const ADVANCED_SETTINGS: AdvancedSetting[] = [
-  { key: 'gpu_count', label: '强制 GPU 数', control: 'number', collapsedByDefault: true },
-  { key: 'target_concurrent_requests', label: '目标并发', control: 'number', collapsedByDefault: true },
   { key: 'llm_review', label: 'LLM 审计（--llm-review）', control: 'checkbox', collapsedByDefault: true },
 ];
 

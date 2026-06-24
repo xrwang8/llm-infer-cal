@@ -41,17 +41,31 @@ Standard attention:
 
 ```text
 per_token_per_layer = 2 x num_kv_heads x head_dim x dtype_bytes
-total_KV = per_token_per_layer x seq_len x num_hidden_layers
+effective_seq_len = sliding_window ? min(seq_len, sliding_window) : seq_len
+raw_KV = per_token_per_layer x effective_seq_len x num_hidden_layers
 ```
 
 MLA:
 
 ```text
 per_token_per_layer = (kv_lora_rank + qk_rope_head_dim) x dtype_bytes
-total_KV = per_token_per_layer x seq_len x num_hidden_layers
+raw_KV = per_token_per_layer x seq_len x num_hidden_layers
 ```
 
-CSA+HCA / NSA apply their sparse reduction after the baseline formula.
+CSA+HCA / NSA apply their sparse reduction after the baseline formula:
+
+```text
+CSA+HCA raw_KV = baseline x avg(1 / compress_ratio)
+NSA raw_KV = baseline x min(nsa_topk / effective_seq_len, 1.0)
+paged_attention_factor = 0.75   # when paged attention is enabled, else 1.00
+total_KV = raw_KV x paged_attention_factor
+```
+
+MoE activation uses the same base activation formula plus:
+
+```text
+moe_activation_correction = 1 + active_experts / total_experts * 0.5
+```
 
 ## TP And PP Sharding
 
@@ -88,9 +102,17 @@ as the term that scales with concurrency:
 ```text
 reserved_per_gpu = max(3GB, 10% x HBM)
 usable_per_gpu = HBM - reserved_per_gpu
-needed_per_gpu = resident_weight_per_gpu
-               + activation_working_set_per_gpu
-               + concurrent_requests x per_gpu_KV
+concurrent_KV = concurrent_requests x per_gpu_KV
+decode_required = resident_weight_per_gpu
+                + decode_activation_per_gpu
+                + concurrent_KV
+prefill_active_requests = max(concurrent_requests / 8, 1)
+prefill_tokens = prefill_active_requests x 1500
+prefill_peak_activation = activation_working_set x prefill_tokens / 2048
+prefill_required = resident_weight_per_gpu
+                 + prefill_peak_activation_per_gpu
+                 + concurrent_KV
+required_per_gpu = max(decode_required, prefill_required)
 ```
 
 Activation is sized from the serving engine's batched-token profiling budget

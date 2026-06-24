@@ -7,10 +7,8 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
-  Clock,
   Cpu,
   Database,
-  Gauge,
   GitCompare,
   Github,
   HardDrive,
@@ -20,7 +18,6 @@ import {
   Play,
   RefreshCcw,
   Search,
-  Settings2,
   Terminal,
   X,
   Zap,
@@ -34,7 +31,6 @@ import {
   defaultRemoteModelId,
   formatBytes,
   formatFloat,
-  formatMs,
   formatNumber,
   groupGpusByVendor,
   groupModelsByProvider,
@@ -190,16 +186,10 @@ export function App() {
   const weightBytes = annotatedValue<number>(visibleReport?.weights?.safetensors_total_bytes);
   const params = annotatedValue<number>(visibleReport?.weights?.params_estimated);
   const activeParams = annotatedValue<number>(visibleReport?.weights?.active_params_estimated);
-  const maxConcurrent = annotatedValue<number>(visibleReport?.performance?.max_concurrent);
-  const prefillMs = annotatedValue<number>(visibleReport?.performance?.prefill?.latency_ms);
-  const clusterTps = annotatedValue<number>(visibleReport?.performance?.decode?.cluster_tokens_per_sec);
   const engineSupport = visibleReport?.engine_compatibility?.support ?? 'unknown';
   const advancedControls = advancedSettings();
   const reviewerSettings = llmReviewSettings();
   const selectedModelLabel = (visibleReport?.model?.id ?? form.model_id) || '选择模型';
-  const contextValue = numericValue(form.context_length) ?? selectedFleet?.kv_reference_context_tokens ?? kvRows.at(-1)?.context_tokens ?? 40960;
-  const contextMax = Math.max(contextValue, kvRows.at(-1)?.context_tokens ?? 0, 131072);
-  const concurrentValue = numericValue(form.target_concurrent_requests) ?? selectedFleet?.tier_concurrent_requests ?? selectedFleet?.max_concurrent_at_reference_ctx ?? 1;
   const moeTraits = visibleReport?.architecture?.moe;
   const isMoe = !!moeTraits || (!!params && !!activeParams && activeParams < params);
   const totalExperts = Number(moeTraits?.routed_experts ?? moeTraits?.num_routed_experts ?? 8);
@@ -398,9 +388,9 @@ export function App() {
       <main className="pageBody">
         <div className="heroRow">
           <div>
-            <h1>GPU Memory & Performance Estimator</h1>
+            <h1>GPU Memory Estimator</h1>
             <p>
-              估算 LLM 推理显存、TTFT、tok/s 和多 GPU 方案，辅助选择模型、引擎和 GPU 部署规格。
+              估算 LLM 推理显存和多 GPU 方案，辅助选择模型、引擎和 GPU 部署规格。
             </p>
           </div>
           <nav className="viewTabs" aria-label="主视图">
@@ -514,33 +504,6 @@ export function App() {
                       />
                     </Field>
                   </div>
-                </ConfigSection>
-
-                <Separator />
-
-                <ConfigSection icon={<Settings2 size={16} />} title="Context & Workload">
-                  <SliderWithInput
-                    label="Context Window"
-                    min={512}
-                    max={contextMax}
-                    step={512}
-                    value={contextValue}
-                    onValueChange={(value) => updateField('context_length', String(value))}
-                    format={formatCompact}
-                    unit="tok"
-                    markers={[512, Math.floor(contextMax * 0.25), Math.floor(contextMax * 0.5), contextMax]}
-                  />
-                  <SliderWithInput
-                    label="Concurrent Users"
-                    min={1}
-                    max={4096}
-                    step={1}
-                    value={Math.max(1, Math.min(4096, concurrentValue))}
-                    onValueChange={(value) => updateField('target_concurrent_requests', String(value))}
-                    format={formatCompact}
-                    unit="users"
-                    markers={[1, 32, 256, 1024, 4096]}
-                  />
                 </ConfigSection>
 
                 <Separator />
@@ -662,6 +625,20 @@ export function App() {
                       </span>
                     </summary>
                     <div className="advancedGrid">
+                      <NumberField
+                        label="Context Window"
+                        value={form.context_length}
+                        placeholder="自动使用模型上下文"
+                        hint="留空时使用模型配置或内置参考上下文。"
+                        onChange={(value) => updateField('context_length', value)}
+                      />
+                      <NumberField
+                        label="Concurrent Users"
+                        value={form.target_concurrent_requests}
+                        placeholder="自动推荐 min/dev/prod"
+                        hint="留空时保留 min/dev/prod 三档；填写后只计算这个并发数。"
+                        onChange={(value) => updateField('target_concurrent_requests', value)}
+                      />
                       {advancedControls.map((setting) =>
                         setting.control === 'checkbox' ? (
                           <CheckboxField
@@ -719,9 +696,6 @@ export function App() {
                 <MetricCards
                   selectedFleet={selectedFleet}
                   weightBytes={weightBytes}
-                  prefillMs={prefillMs}
-                  clusterTps={clusterTps}
-                  maxConcurrent={maxConcurrent}
                   form={form}
                   hardware={visibleReport?.hardware ?? selectedGpu}
                 />
@@ -775,10 +749,10 @@ export function App() {
 
                 <section className="innerPanel">
                   <SectionTitle title="Formula Reference" />
-                  <FormulaReference report={visibleReport} form={form} activeParams={activeParams} />
+                  <FormulaReference report={visibleReport} form={form} activeParams={activeParams} option={selectedFleet} />
                 </section>
 
-                <InferenceSimulation prefillMs={prefillMs} clusterTps={clusterTps} modelId={selectedModelLabel} />
+                <InferenceProcess report={visibleReport} option={selectedFleet} />
               </div>
             </section>
           </form>
@@ -1131,10 +1105,22 @@ function SwitchField({
   );
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function NumberField({
+  label,
+  value,
+  placeholder,
+  hint,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  hint?: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <Field label={label}>
-      <input inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} />
+    <Field label={label} hint={hint}>
+      <input inputMode="decimal" value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </Field>
   );
 }
@@ -1243,23 +1229,15 @@ function Legend({ tone, label, percent }: { tone: string; label: string; percent
 function MetricCards({
   selectedFleet,
   weightBytes,
-  prefillMs,
-  clusterTps,
-  maxConcurrent,
   form,
   hardware,
 }: {
   selectedFleet?: FleetOption;
   weightBytes?: number;
-  prefillMs?: number;
-  clusterTps?: number;
-  maxConcurrent?: number;
   form: EvaluateForm;
   hardware?: GpuSummary | null;
 }) {
-  const required = selectedFleet?.required_bytes_per_gpu_at_tier ?? requiredBytes(selectedFleet);
-  const concurrent = selectedFleet?.tier_concurrent_requests ?? maxConcurrent ?? 1;
-  const perUserTps = clusterTps && concurrent ? clusterTps / concurrent : clusterTps;
+  const totalRequired = totalRequiredBytes(selectedFleet);
   const modelWeightPerGpu = selectedFleet?.main_weight_bytes_per_gpu ?? selectedFleet?.weight_bytes_per_gpu ?? weightBytes;
 
   return (
@@ -1267,20 +1245,12 @@ function MetricCards({
       <MetricCard
         icon={<HardDrive size={17} />}
         label="Total VRAM"
-        value={formatBytes(required)}
-        sub={`${selectedFleet?.gpu_count ?? 1}× ${hardware?.id ?? form.gpu}`}
+        value={formatBytes(totalRequired)}
+        sub={`${selectedFleet?.gpu_count ?? 1}× ${hardware?.id ?? form.gpu} total required`}
         accent
-      />
-      <MetricCard icon={<Clock size={17} />} label="Time to First Token" value={formatMs(prefillMs)} sub={`${form.input_tokens || 2000} prompt tokens`} />
-      <MetricCard
-        icon={<Zap size={17} />}
-        label="Tokens / Second"
-        value={`${formatFloat(perUserTps, 1)} tok/s`}
-        sub={`${formatFloat(clusterTps, 0)} tok/s total · ${formatNumber(maxConcurrent)} max concurrent`}
       />
       <MetricCard icon={<Layers size={17} />} label="Model Weights / GPU" value={formatBytes(modelWeightPerGpu)} sub="GPU resident model weights" />
       <MetricCard icon={<Activity size={17} />} label="Recommended GPUs" value={selectedFleet?.gpu_count ? `${selectedFleet.gpu_count} 张` : '-'} sub={tierText(selectedFleet?.tier)} />
-      <MetricCard icon={<Gauge size={17} />} label="Engine Support" value={form.engine} sub="vLLM / SGLang command preview" />
     </div>
   );
 }
@@ -1359,7 +1329,7 @@ function MemoryBreakdown({ option, hardware }: { option?: FleetOption; hardware?
   return (
     <div className="memoryBars">
       <div className="breakdownSummary">
-        <span>Required / GPU</span>
+        <span>Required / GPU (per GPU)</span>
         <strong>{formatBytes(required)}</strong>
       </div>
       <Bar label="Main Weights / GPU" value={mainWeight} total={memoryBytes} tone="weight" />
@@ -1485,9 +1455,17 @@ function ComparisonTable({ reports }: { reports: Report[] }) {
   }
 
   const sorted = [...reports].sort((a, b) => {
-    const aTps = annotatedValue<number>(a.performance?.decode?.cluster_tokens_per_sec) ?? 0;
-    const bTps = annotatedValue<number>(b.performance?.decode?.cluster_tokens_per_sec) ?? 0;
-    return bTps - aTps;
+    const aOption = bestFleetOption(a.fleet);
+    const bOption = bestFleetOption(b.fleet);
+    const fitDelta = Number(!!bOption?.fits) - Number(!!aOption?.fits);
+    if (fitDelta !== 0) {
+      return fitDelta;
+    }
+    const gpuDelta = (aOption?.gpu_count ?? Number.MAX_SAFE_INTEGER) - (bOption?.gpu_count ?? Number.MAX_SAFE_INTEGER);
+    if (gpuDelta !== 0) {
+      return gpuDelta;
+    }
+    return (b.hardware?.memory_gb ?? 0) - (a.hardware?.memory_gb ?? 0);
   });
 
   return (
@@ -1498,9 +1476,6 @@ function ComparisonTable({ reports }: { reports: Report[] }) {
             <th>GPU</th>
             <th>Min GPUs</th>
             <th>GPU VRAM</th>
-            <th>TTFT</th>
-            <th>Tok/s</th>
-            <th>Total Tok/s</th>
             <th>Mem BW</th>
             <th>状态</th>
           </tr>
@@ -1508,18 +1483,11 @@ function ComparisonTable({ reports }: { reports: Report[] }) {
         <tbody>
           {sorted.map((item) => {
             const option = bestFleetOption(item.fleet);
-            const concurrent = annotatedValue<number>(item.performance?.max_concurrent);
-            const decode = annotatedValue<number>(item.performance?.decode?.cluster_tokens_per_sec);
-            const prefill = annotatedValue<number>(item.performance?.prefill?.latency_ms);
-            const perUserTps = decode && concurrent ? decode / concurrent : decode;
             return (
               <tr key={item.hardware?.id ?? item.generated_command?.command}>
                 <td>{item.hardware?.id ?? '-'}</td>
                 <td>{option?.gpu_count ? `${option.gpu_count} 张` : '-'}</td>
                 <td>{item.hardware?.memory_gb ? `${item.hardware.memory_gb}GB` : '-'}</td>
-                <td>{formatMs(prefill)}</td>
-                <td>{`${formatFloat(perUserTps, 1)} tok/s`}</td>
-                <td>{`${formatFloat(decode, 0)} tok/s`}</td>
                 <td>{item.hardware?.memory_bandwidth_gbps ? `${item.hardware.memory_bandwidth_gbps} GB/s` : '-'}</td>
                 <td>
                   <span className={option?.fits ? 'fitText' : 'missText'}>{option?.fits ? '可行' : '不足'}</span>
@@ -1533,17 +1501,28 @@ function ComparisonTable({ reports }: { reports: Report[] }) {
   );
 }
 
-function FormulaReference({ report, form, activeParams }: { report: Report | null; form: EvaluateForm; activeParams?: number }) {
+function FormulaReference({
+  report,
+  form,
+  activeParams,
+  option,
+}: {
+  report: Report | null;
+  form: EvaluateForm;
+  activeParams?: number;
+  option?: FleetOption;
+}) {
   const params = annotatedValue<number>(report?.weights?.params_estimated);
   const weight = annotatedValue<number>(report?.weights?.safetensors_total_bytes);
   const kv = report?.kv_cache_by_context?.at(-1);
-  const activation = report?.activation_by_context?.at(-1);
   const isMoe = !!params && !!activeParams && activeParams < params;
+  const architecture = report?.architecture ?? {};
+  const hiddenSize = architecture.hidden_size ?? architecture.hidden;
   const kvBits = report?.inference_options?.kv_cache_bits ?? Number(form.kv_cache_bits || 16);
   const paged = report?.inference_options?.paged_attention ?? form.paged_attention;
   const speculativeWeight = annotatedValue<number>(report?.inference_options?.speculative_extra_weight_bytes);
   const cpuOffload = report?.inference_options?.cpu_offload_bytes_per_gpu ?? 0;
-  const targetConcurrency = report?.inference_options?.target_concurrent_requests ?? Number(form.target_concurrent_requests || 0);
+  const tierConcurrency = option?.tier_concurrent_requests ?? report?.inference_options?.target_concurrent_requests ?? Number(form.target_concurrent_requests || 0);
 
   return (
     <div className="formulaList">
@@ -1560,43 +1539,58 @@ ${isMoe ? 'MoE: all expert weights stay resident in VRAM.' : 'Dense: all weights
       <details open>
         <summary>KV Cache VRAM</summary>
         <pre>
-{`kv = architecture_kv_shape * seq_len * layers * ${kvBits} bits
-${paged ? 'paged_attention factor = 0.75' : 'paged_attention factor = 1.00'}
+{`standard: per_token_per_layer_bits = 2 * num_kv_heads * head_dim * ${kvBits}
+MLA: per_token_per_layer_bits = (kv_lora_rank + qk_rope_head_dim) * ${kvBits}
+effective_seq_len = sliding_window ? min(seq_len, sliding_window) : seq_len
+baseline = per_token_per_layer_bits * effective_seq_len * num_layers / 8
+CSA+HCA: baseline * avg(1 / compress_ratio)
+NSA: baseline * min(nsa_topk / effective_seq_len, 1.0)
+paged_attention_factor = ${paged ? '0.75' : '1.00'}
 ${kv?.bytes?.value ? `selected = ${formatBytes(kv.bytes.value)}` : 'selected = waiting for report'}`}
         </pre>
       </details>
       <details>
         <summary>Activations</summary>
         <pre>
-{`activation ~= max_num_batched_tokens * hidden_size * 2B * activation_factor
-${isMoe ? 'MoE router/dispatch correction is included.' : 'Dense activation working-set estimate.'}
-${targetConcurrency ? `target concurrency = ${formatNumber(targetConcurrency)} requests; activation is charged once` : 'activation is charged once; KV cache scales with tier concurrency'}
-${activation?.bytes?.value ? `selected = ${formatBytes(activation.bytes.value)}` : 'selected = waiting for report'}`}
+{`activation = max_num_batched_tokens * hidden_size * dtype_bytes * activation_factor
+max_num_batched_tokens = 2048; dtype_bytes = 2; activation_factor = 2
+MoE activation correction = 1 + active_experts / total_experts * 0.5
+${hiddenSize ? `hidden_size = ${formatNumber(hiddenSize)}` : 'hidden_size = waiting for report'}
+${isMoe ? 'MoE correction is applied by the backend.' : 'Dense model uses correction factor 1.0.'}`}
         </pre>
       </details>
       <details>
-        <summary>TTFT / Tokens Per Second</summary>
+        <summary>Required / GPU Fit</summary>
         <pre>
-{`ttft_flops = 2 * ${isMoe ? 'active_params' : 'params'} * input_tokens
-decode_tps = effective_bandwidth / active_weight_bytes_per_gpu
-${isMoe ? `MoE active params = ${formatNumber(activeParams)} / total ${formatNumber(params)}` : ''}`}
+{`decode_required = weights_per_gpu + decode_activation_per_gpu + concurrent * kv_per_gpu
+prefill_required = weights_per_gpu + prefill_peak_activation_per_gpu + concurrent * kv_per_gpu
+required_per_gpu = max(decode_required, prefill_required)
+${tierConcurrency ? `concurrent = ${formatNumber(tierConcurrency)} requests` : 'concurrent = waiting for selected tier'}
+${option?.decode_required_bytes_per_gpu_at_tier ? `decode_required = ${formatBytes(option.decode_required_bytes_per_gpu_at_tier)}` : 'decode_required = waiting for report'}
+${option?.prefill_activation_bytes_per_gpu_at_tier ? `prefill_peak_activation = ${formatBytes(option.prefill_activation_bytes_per_gpu_at_tier)}` : 'prefill_peak_activation = waiting for report'}
+${option?.prefill_required_bytes_per_gpu_at_tier ? `prefill_required = ${formatBytes(option.prefill_required_bytes_per_gpu_at_tier)}` : 'prefill_required = waiting for report'}
+${option?.required_bytes_per_gpu_at_tier ? `selected = ${formatBytes(option.required_bytes_per_gpu_at_tier)}` : 'selected = waiting for report'}`}
         </pre>
       </details>
     </div>
   );
 }
 
-function InferenceSimulation({ prefillMs, clusterTps, modelId }: { prefillMs?: number; clusterTps?: number; modelId: string }) {
+function InferenceProcess({ report, option }: { report: Report | null; option?: FleetOption }) {
+  const explainText = memoryExplainText(report?.explain_text, {
+    tier: option?.tier,
+    gpuCount: option?.gpu_count,
+    contextTokens: option?.kv_reference_context_tokens,
+  });
+
   return (
-    <section className="innerPanel simulationPanel">
-      <div className="simulationHeader">
-        <SectionTitle title="Inference Simulation" />
-        <span>{modelId}</span>
+    <section className="innerPanel processPanel">
+      <div className="processHeader">
+        <SectionTitle title="推理过程" />
+        <span>--explain 默认开启</span>
       </div>
-      <div className="simulationGrid">
-        <MetricCard icon={<Clock size={17} />} label="TTFT (est.)" value={formatMs(prefillMs)} />
-        <MetricCard icon={<Zap size={17} />} label="Tok/s (est.)" value={formatFloat(clusterTps, 1)} />
-        <MetricCard icon={<Activity size={17} />} label="Generated" value="-" sub="Press Play to simulate inference" />
+      <div className="processBox">
+        <pre>{explainText || '等待评估结果'}</pre>
       </div>
     </section>
   );
@@ -1689,6 +1683,57 @@ function requiredBytes(option?: FleetOption): number {
   const concurrent = option.tier_concurrent_requests ?? 1;
   const kv = (option.kv_bytes_per_request_per_gpu ?? option.kv_bytes_per_request ?? 0) * concurrent;
   return (option.weight_bytes_per_gpu ?? 0) + kv + (option.activation_bytes_per_request_per_gpu ?? 0);
+}
+
+export function totalRequiredBytes(option?: FleetOption): number {
+  const perGpu = option?.required_bytes_per_gpu_at_tier ?? requiredBytes(option);
+  return perGpu * (option?.gpu_count ?? 1);
+}
+
+type ExplainTextFilter = {
+  tier?: string;
+  gpuCount?: number;
+  contextTokens?: number;
+};
+
+export function memoryExplainText(explainText?: string | null, filter: ExplainTextFilter = {}): string {
+  const trimmed = explainText?.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const selectedContextHeading = filter.contextTokens ? `KV cache @ ${explainContextLabel(filter.contextTokens)} context` : null;
+  const selectedFleetPrefix = filter.tier ? `Fleet tier: ${filter.tier}` : null;
+
+  return trimmed
+    .split(/\n{2,}/)
+    .filter((block) => {
+      const heading = block.split('\n', 1)[0]?.trim() ?? '';
+      if (/^(prefill latency|decode throughput|k bound|l bound|max concurrent\b)/i.test(heading)) {
+        return false;
+      }
+      if (selectedContextHeading && heading.startsWith('KV cache @')) {
+        return heading === selectedContextHeading;
+      }
+      if (selectedFleetPrefix && heading.startsWith('Fleet tier:')) {
+        if (!heading.startsWith(selectedFleetPrefix)) {
+          return false;
+        }
+        return filter.gpuCount ? heading.includes(`(${filter.gpuCount} GPUs)`) : true;
+      }
+      return !/(\btok\/s\b|tokens per second|tokens-per-second|tok_per_sec|tokens_per_sec)/i.test(block);
+    })
+    .join('\n\n')
+    .trim();
+}
+
+function explainContextLabel(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return tokens % 1_000_000 === 0 ? `${tokens / 1_000_000}M` : `${(tokens / 1_000_000).toFixed(1)}M`;
+  }
+  if (tokens >= 1024) {
+    return `${Math.floor(tokens / 1024)}K`;
+  }
+  return String(tokens);
 }
 
 function numericValue(value: string): number | undefined {

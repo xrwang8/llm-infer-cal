@@ -6,6 +6,7 @@ use crate::command_generator::{
 use crate::engine_compat::EngineCompatEntry;
 use serde_json::json;
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_vllm_command(
     model_id: &str,
     profile: &ArchitectureProfile,
@@ -28,6 +29,8 @@ pub fn generate_vllm_command(
             "  --pipeline-parallel-size {}",
             parallelism.pipeline_parallel_size
         ));
+    }
+    if parallelism.node_count() > 1 {
         lines.push("  --distributed-executor-backend ray".to_string());
     }
 

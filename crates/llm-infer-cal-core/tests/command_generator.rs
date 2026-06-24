@@ -312,3 +312,47 @@ fn sglang_multinode_command_uses_total_tp_and_node_bootstrap_flags() {
     assert!(cmd.contains("--node-rank ${NODE_RANK:-0}"));
     assert!(cmd.contains("--dist-init-addr ${NODE0_IP:-<node0-ip>}:20000"));
 }
+
+#[test]
+fn vllm_multinode_tp_command_uses_ray_backend() {
+    let cmd = generate_vllm_command(
+        "deepseek-ai/DeepSeek-V4-Pro",
+        &profile("deepseek_v4", Some(1_048_576)),
+        Parallelism {
+            total_gpus: 16,
+            tensor_parallel_size: 16,
+            pipeline_parallel_size: 1,
+        },
+        None,
+        Some(1_048_576),
+        None,
+        None,
+        None,
+    );
+
+    assert!(cmd.contains("--tensor-parallel-size 16"));
+    assert!(cmd.contains("--distributed-executor-backend ray"));
+}
+
+#[test]
+fn sglang_multinode_tp_command_uses_node_bootstrap_flags() {
+    let cmd = generate_sglang_command(
+        "deepseek-ai/DeepSeek-V4-Pro",
+        &profile("deepseek_v4", Some(1_048_576)),
+        Parallelism {
+            total_gpus: 16,
+            tensor_parallel_size: 16,
+            pipeline_parallel_size: 1,
+        },
+        None,
+        Some(1_048_576),
+        None,
+        None,
+        None,
+    );
+
+    assert!(cmd.contains("--tp 16"));
+    assert!(cmd.contains("--nnodes 2"));
+    assert!(cmd.contains("--node-rank ${NODE_RANK:-0}"));
+    assert!(cmd.contains("--dist-init-addr ${NODE0_IP:-<node0-ip>}:20000"));
+}

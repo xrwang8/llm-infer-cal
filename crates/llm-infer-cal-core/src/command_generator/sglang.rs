@@ -4,6 +4,7 @@ use crate::command_generator::{
 };
 use crate::engine_compat::EngineCompatEntry;
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_sglang_command(
     model_id: &str,
     profile: &ArchitectureProfile,

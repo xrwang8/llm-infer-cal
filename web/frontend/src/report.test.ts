@@ -103,19 +103,11 @@ describe('report helpers', () => {
     expect(settings.every((setting) => setting.collapsedByDefault)).toBe(true);
   });
 
-  it('hides explain and refresh from advanced settings', () => {
+  it('hides duplicate and default controls from advanced settings', () => {
     const settings = advancedSettings();
 
-    expect(settings.map((setting) => setting.label)).toEqual([
-      '强制 GPU 数',
-      '目标并发',
-      'LLM 审计（--llm-review）',
-    ]);
-    expect(settings.map((setting) => setting.key)).toEqual([
-      'gpu_count',
-      'target_concurrent_requests',
-      'llm_review',
-    ]);
+    expect(settings.map((setting) => setting.label)).toEqual(['LLM 审计（--llm-review）']);
+    expect(settings.map((setting) => setting.key)).toEqual(['llm_review']);
     expect(settings.every((setting) => setting.collapsedByDefault)).toBe(true);
   });
 

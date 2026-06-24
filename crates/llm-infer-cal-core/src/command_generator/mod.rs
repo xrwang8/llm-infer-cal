@@ -3,6 +3,8 @@ pub mod vllm;
 
 use crate::engine_compat::{EngineCompatEntry, EngineFlag};
 
+const DEFAULT_GPUS_PER_NODE: u64 = 8;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Parallelism {
     pub total_gpus: u64,
@@ -19,8 +21,11 @@ impl Parallelism {
         }
     }
 
-    pub const fn node_count(self) -> u64 {
-        self.pipeline_parallel_size
+    pub fn node_count(self) -> u64 {
+        self.total_gpus
+            .div_ceil(DEFAULT_GPUS_PER_NODE)
+            .max(self.pipeline_parallel_size)
+            .max(1)
     }
 }
 

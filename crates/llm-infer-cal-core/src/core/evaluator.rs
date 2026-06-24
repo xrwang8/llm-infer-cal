@@ -509,6 +509,7 @@ fn apply_paged_attention(mut value: AnnotatedValue<u64>) -> AnnotatedValue<u64> 
     value
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_command(
     engine: &str,
     model_id: &str,

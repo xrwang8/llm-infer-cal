@@ -158,21 +158,33 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
             continue;
         }
 
+        let dtype_bits = report.kv_cache_bits.max(1);
+        let dtype_note = if dtype_bits % 8 == 0 {
+            format!("{}B", dtype_bits / 8)
+        } else {
+            format!("{dtype_bits} bits")
+        };
         let is_mla = attn.variant == AttentionVariant::Mla;
         let is_csa_hca = attn.variant == AttentionVariant::CsaHca;
-        let (per_tok_per_layer, mut formula, mut inputs) = if is_mla
+        let is_nsa = attn.variant == AttentionVariant::Nsa;
+        let (per_tok_per_layer_bits, mut formula, mut inputs) = if is_mla
             && attn.kv_lora_rank.unwrap_or(0) > 0
         {
             let rank = attn.kv_lora_rank.unwrap_or(0);
             let rope_dim = attn.qk_rope_head_dim.unwrap_or(0);
             (
-                (rank + rope_dim) * 2,
-                "per_tok_per_layer = (kv_lora_rank + qk_rope_head_dim) x dtype_bytes   (MLA: latent KV plus decoupled RoPE key)"
+                (rank + rope_dim) * dtype_bits,
+                "per_tok_per_layer_bits = (kv_lora_rank + qk_rope_head_dim) x dtype_bits   (MLA: latent KV plus decoupled RoPE key)"
                     .to_string(),
                 vec![
                     ExplainInput::new("kv_lora_rank", rank.to_string(), "[verified]"),
                     ExplainInput::new("qk_rope_head_dim", rope_dim.to_string(), "[verified]"),
-                    ExplainInput::with_note("dtype_bytes", "2", "[verified]", "BF16/FP16"),
+                    ExplainInput::with_note(
+                        "dtype_bits",
+                        dtype_bits.to_string(),
+                        "[user-set]",
+                        &dtype_note,
+                    ),
                     ExplainInput::new("seq_len", fmt_u64(*ctx), "[verified]"),
                     ExplainInput::new(
                         "num_layers",
@@ -182,10 +194,10 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
                 ],
             )
         } else {
-            let per_tok_per_layer = 2 * attn.num_kv_heads * attn.head_dim * 2;
+            let per_tok_per_layer_bits = 2 * attn.num_kv_heads * attn.head_dim * dtype_bits;
             (
-                    per_tok_per_layer,
-                    "per_tok_per_layer = 2 x num_kv_heads x head_dim x dtype_bytes   (standard attention)"
+                    per_tok_per_layer_bits,
+                    "per_tok_per_layer_bits = 2 x num_kv_heads x head_dim x dtype_bits   (standard attention)"
                         .to_string(),
                     vec![
                         ExplainInput::new(
@@ -194,7 +206,12 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
                             "[verified]",
                         ),
                         ExplainInput::new("head_dim", attn.head_dim.to_string(), "[verified]"),
-                        ExplainInput::with_note("dtype_bytes", "2", "[verified]", "BF16/FP16"),
+                        ExplainInput::with_note(
+                            "dtype_bits",
+                            dtype_bits.to_string(),
+                            "[user-set]",
+                            &dtype_note,
+                        ),
                         ExplainInput::new("seq_len", fmt_u64(*ctx), "[verified]"),
                         ExplainInput::new(
                             "num_layers",
@@ -205,15 +222,59 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
                 )
         };
 
-        let baseline = per_tok_per_layer * ctx * profile.num_hidden_layers;
-        let mut steps = vec![
-            format!("per_tok_per_layer = {} bytes", fmt_u64(per_tok_per_layer)),
-            format!(
-                "baseline = per_tok_per_layer x seq_len x num_layers = {} bytes",
-                fmt_u64(baseline)
-            ),
-        ];
+        let mut effective_seq = *ctx;
+        let mut steps = Vec::new();
+        if let Some(sliding_window) = profile.sliding_window {
+            if sliding_window > 0 && !attn.variant.is_sparse() {
+                effective_seq = (*ctx).min(sliding_window);
+                inputs.push(ExplainInput::new(
+                    "sliding_window",
+                    fmt_u64(sliding_window),
+                    "[verified]",
+                ));
+                if effective_seq < *ctx {
+                    formula.push_str(
+                        "\napply_sliding_window: effective_seq_len = min(seq_len, sliding_window)",
+                    );
+                    steps.push(format!(
+                        "effective_seq_len = min(seq_len, sliding_window) = {}",
+                        fmt_u64(effective_seq)
+                    ));
+                }
+            }
+        }
+        if effective_seq == *ctx {
+            steps.push(format!(
+                "effective_seq_len = seq_len = {}",
+                fmt_u64(effective_seq)
+            ));
+        }
 
+        if dtype_bits % 8 == 0 {
+            steps.push(format!(
+                "per_tok_per_layer = {} bytes",
+                fmt_u64(per_tok_per_layer_bits / 8)
+            ));
+        } else {
+            steps.push(format!(
+                "per_tok_per_layer = {} bits",
+                fmt_u64(per_tok_per_layer_bits)
+            ));
+        }
+
+        let baseline_bits = per_tok_per_layer_bits * effective_seq * profile.num_hidden_layers;
+        let baseline_bytes = if dtype_bits % 8 == 0 {
+            baseline_bits / 8
+        } else {
+            ceil_div(baseline_bits, 8)
+        };
+        steps.push(format!(
+            "baseline = per_tok_per_layer x effective_seq_len x num_layers = {} bytes",
+            fmt_u64(baseline_bytes)
+        ));
+
+        let mut scale = 1.0;
+        let mut scale_name = None;
         if is_csa_hca
             && attn
                 .compress_ratios
@@ -231,12 +292,60 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
                 "\napply_csa_hca: baseline x avg(1/r_i for r_i in compress_ratios, 0 = keep-all=1)",
             );
             steps.push(format!("avg_keep_fraction = {avg:.4}"));
+            scale = avg;
+            scale_name = Some("avg_keep_fraction");
+        } else if is_nsa {
+            if let Some(nsa_topk) = attn.nsa_topk {
+                if nsa_topk > 0 {
+                    let sparsity = (nsa_topk as f64 / effective_seq as f64).min(1.0);
+                    inputs.push(ExplainInput::new(
+                        "nsa_topk",
+                        fmt_u64(nsa_topk),
+                        "[verified]",
+                    ));
+                    formula
+                        .push_str("\napply_nsa: baseline x min(nsa_topk / effective_seq_len, 1.0)");
+                    steps.push(format!(
+                        "nsa_sparsity = min(nsa_topk / effective_seq_len, 1.0) = {sparsity:.4}"
+                    ));
+                    scale = sparsity;
+                    scale_name = Some("nsa_sparsity");
+                }
+            }
+        }
+
+        let raw_kv = if dtype_bits % 8 == 0 {
+            ((baseline_bits / 8) as f64 * scale) as u64
+        } else {
+            ceil_div((baseline_bits as f64 * scale) as u64, 8)
+        };
+        match scale_name {
+            Some(name) => {
+                let prefix = if report.paged_attention {
+                    "raw_kv"
+                } else {
+                    "result"
+                };
+                steps.push(format!(
+                    "{prefix} = baseline x {name} = {} bytes",
+                    fmt_u64(raw_kv)
+                ));
+            }
+            None if report.paged_attention => {
+                steps.push(format!("raw_kv = baseline = {} bytes", fmt_u64(raw_kv)));
+            }
+            None => {
+                steps.push(format!("result = raw_kv = {} bytes", fmt_u64(raw_kv)));
+            }
+        }
+
+        if report.paged_attention {
+            formula.push_str("\napply_paged_attention: raw_kv x 0.75");
+            steps.push("paged_attention_factor = 0.75".to_string());
             steps.push(format!(
-                "result = baseline x avg_keep_fraction = {} bytes",
+                "result = raw_kv x paged_attention_factor = {} bytes",
                 fmt_u64(av.value)
             ));
-        } else {
-            steps.push(format!("result = baseline = {} bytes", fmt_u64(av.value)));
         }
 
         let mut entry =
@@ -249,7 +358,7 @@ fn kv_cache_contexts(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>)
             av.value as f64 / 1e9,
             av.label
         );
-        entry.source = "DeepSeek-V2 paper (MLA); DeepSeek-V4 tech report (CSA+HCA); standard attention formula per Attention Is All You Need (Vaswani 2017)".to_string();
+        entry.source = "DeepSeek-V2 paper (MLA); DeepSeek-V4 tech report (CSA+HCA/NSA); vLLM PagedAttention; standard attention formula per Attention Is All You Need (Vaswani 2017)".to_string();
         entry.methodology_anchor = "#kv-cache-per-request".to_string();
         entries.push(entry);
     }
@@ -261,16 +370,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
     };
 
     for opt in &fleet.options {
-        let headroom = opt
-            .usable_bytes_per_gpu
-            .saturating_sub(opt.weight_bytes_per_gpu)
-            .saturating_sub(opt.activation_bytes_per_request_per_gpu);
-        let fit_criterion = match opt.tier {
-            "min" => 1,
-            "dev" => 8,
-            "prod" => 16,
-            _ => 1,
-        };
+        let tier_concurrent = opt.tier_concurrent_requests;
         let layout = if opt.pipeline_parallel_size > 1 {
             format!(
                 "TP{} x PP{} ({} nodes)",
@@ -298,6 +398,10 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
                 fmt_u64(opt.activation_bytes_per_request_per_gpu)
             ),
             format!(
+                "tier concurrency = {} requests",
+                fmt_u64(tier_concurrent)
+            ),
+            format!(
                 "total model weight bytes = {} (observed safetensors), allocated over {} GPUs",
                 fmt_u64(report.weight.total_bytes.value),
                 opt.gpu_count
@@ -309,15 +413,30 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
                 fmt_u64(kv_per_gpu)
             ),
             format!(
-                "KV headroom per GPU = usable - resident_weight - activation = {} bytes ({:.2} GB)",
-                fmt_u64(headroom),
-                headroom as f64 / 1e9
+                "concurrent_KV = {} x {} = {} bytes",
+                fmt_u64(tier_concurrent),
+                fmt_u64(kv_per_gpu),
+                fmt_u64(tier_concurrent.saturating_mul(kv_per_gpu))
             ),
             format!(
-                "tier criterion: headroom >= {fit_criterion} x per_gpu_kv_per_request_at_{reference_ctx}"
+                "decode_required = resident_weight + activation_working_set + concurrent_KV = {} bytes",
+                fmt_u64(opt.decode_required_bytes_per_gpu_at_tier)
             ),
             format!(
-                "selected smallest candidate satisfying the criterion: {} GPUs ({layout})",
+                "prefill_peak_activation per GPU = {} bytes",
+                fmt_u64(opt.prefill_activation_bytes_per_gpu_at_tier)
+            ),
+            format!(
+                "prefill_required = resident_weight + prefill_peak_activation + concurrent_KV = {} bytes",
+                fmt_u64(opt.prefill_required_bytes_per_gpu_at_tier)
+            ),
+            format!(
+                "required_per_gpu = max(decode_required, prefill_required) = {} bytes; usable_per_gpu = {} bytes",
+                fmt_u64(opt.required_bytes_per_gpu_at_tier),
+                fmt_u64(opt.usable_bytes_per_gpu)
+            ),
+            format!(
+                "selected smallest candidate satisfying required_per_gpu <= usable_per_gpu: {} GPUs ({layout})",
                 opt.gpu_count
             ),
         ];
@@ -330,7 +449,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
 
         let mut entry = ExplainEntry::new(
             &format!("Fleet tier: {} ({} GPUs)", opt.tier, opt.gpu_count),
-            "smallest TP/PP candidate where resident_weight_per_gpu + activation_working_set_per_gpu + concurrent x per_gpu_kv_per_request <= usable_per_gpu",
+            "required_per_gpu = max(decode_required, prefill_required)",
         );
         entry.inputs = vec![
             ExplainInput::new(
@@ -346,13 +465,23 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
             ),
             ExplainInput::new("selected_layout", layout, "[estimated]"),
             ExplainInput::new(
+                "tier_concurrent_requests",
+                tier_concurrent.to_string(),
+                "[estimated]",
+            ),
+            ExplainInput::new(
                 "GPU memory_gb",
                 format!("{} GB", gpu_spec.memory_gb),
                 "[verified]",
             ),
         ];
         entry.steps = steps;
-        entry.result = format!("{} GPUs, fit={}", opt.gpu_count, opt.fits);
+        entry.result = format!(
+            "{} GPUs, required_per_gpu={} bytes, fit={}",
+            opt.gpu_count,
+            fmt_u64(opt.required_bytes_per_gpu_at_tier),
+            opt.fits
+        );
         entry.source =
             "vLLM GPU memory profiling reserves weights, peak activation, and KV cache inside gpu_memory_utilization; SGLang memory pool similarly budgets static weights plus KV cache"
                 .to_string();

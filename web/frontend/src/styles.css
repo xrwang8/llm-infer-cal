@@ -90,7 +90,7 @@ summary:focus-visible {
 .resultHeader,
 .barText,
 .sliderLabel,
-.simulationHeader,
+.processHeader,
 .pageFooter a {
   display: flex;
   align-items: center;
@@ -1424,26 +1424,40 @@ td {
   color: var(--warning);
 }
 
-.simulationPanel {
+.processPanel {
   display: grid;
   gap: 12px;
 }
 
-.simulationHeader {
+.processHeader {
   justify-content: space-between;
   gap: 10px;
 }
 
-.simulationHeader span {
+.processHeader span {
   color: var(--muted-foreground);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.simulationGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+.processBox {
+  overflow: hidden;
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.processBox pre {
+  min-height: 164px;
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px;
+  color: var(--foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .compareShell {
@@ -1528,7 +1542,6 @@ td {
   }
 
   .metricGrid,
-  .simulationGrid,
   .twoCol {
     grid-template-columns: 1fr;
   }

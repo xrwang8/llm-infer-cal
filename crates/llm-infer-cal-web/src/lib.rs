@@ -230,7 +230,7 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
         .first()
         .ok_or_else(|| ApiError::bad_request("gpu is required"))?;
     if req.explain.unwrap_or(false) || req.llm_review.unwrap_or(false) {
-        let explain_entries = build_explain(&report);
+        let explain_entries = build_explain(report);
         if req.explain.unwrap_or(false) {
             value["explain_text"] = Value::String(render_explain_text(&explain_entries));
         }

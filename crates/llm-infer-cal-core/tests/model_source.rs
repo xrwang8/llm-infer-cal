@@ -104,7 +104,7 @@ fn model_source_errors_display_message() {
 
 #[test]
 fn builtin_source_returns_qwen36_artifact_without_network() {
-    let artifact = BuiltinSource::default()
+    let artifact = BuiltinSource
         .fetch("Qwen/Qwen3.6-35B-A3B")
         .expect("Qwen3.6-35B-A3B should be embedded");
 
