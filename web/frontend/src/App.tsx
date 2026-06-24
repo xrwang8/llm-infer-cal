@@ -1,19 +1,31 @@
 import {
   Activity,
   AlertTriangle,
+  Calculator,
+  Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clipboard,
+  Clock,
   Cpu,
+  Database,
   Gauge,
+  GitCompare,
+  Github,
+  HardDrive,
+  Info,
   Layers,
+  LayoutGrid,
   Play,
   RefreshCcw,
+  Search,
   Settings2,
   Terminal,
+  X,
   Zap,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { evaluate, fetchGpus, fetchModels } from './api';
 import {
   advancedSettings,
@@ -26,14 +38,12 @@ import {
   formatNumber,
   groupGpusByVendor,
   groupModelsByProvider,
-  gpuVendorOptionLabel,
   gpuTier,
   gpuTierLabel,
   itemsForGroup,
   labelText,
   llmReviewSettings,
   modelVendorOptionLabel,
-  performanceSettings,
   pct,
   tierText,
   type EvaluateForm,
@@ -81,10 +91,20 @@ const engineOptions = [
 ] as const;
 
 const kvPrecisionOptions = [
-  { value: '16', label: 'FP16/BF16' },
-  { value: '8', label: 'FP8/INT8' },
-  { value: '4', label: 'INT4' },
+  { value: '16', label: 'FP16/BF16', sublabel: '默认 KV cache 精度' },
+  { value: '8', label: 'FP8/INT8', sublabel: '减少约 50% KV cache' },
+  { value: '4', label: 'INT4', sublabel: '实验性低精度 KV cache' },
 ] as const;
+
+const gpuCountOptions = ['', '1', '2', '4', '8', '16', '32', '64'];
+
+type SelectOption = {
+  value: string;
+  label: string;
+  sublabel?: string;
+  badge?: ReactNode;
+  disabled?: boolean;
+};
 
 export function App() {
   const [form, setForm] = useState<EvaluateForm>(DEFAULT_FORM);
@@ -144,9 +164,12 @@ export function App() {
   const prefillMs = annotatedValue<number>(report?.performance?.prefill?.latency_ms);
   const clusterTps = annotatedValue<number>(report?.performance?.decode?.cluster_tokens_per_sec);
   const engineSupport = report?.engine_compatibility?.support ?? 'unknown';
-  const tuningSettings = performanceSettings();
   const advancedControls = advancedSettings();
   const reviewerSettings = llmReviewSettings();
+  const selectedModelLabel = (report?.model?.id ?? form.model_id) || '选择模型';
+  const contextValue = numericValue(form.context_length) ?? selectedFleet?.kv_reference_context_tokens ?? kvRows.at(-1)?.context_tokens ?? 40960;
+  const contextMax = Math.max(contextValue, kvRows.at(-1)?.context_tokens ?? 0, 131072);
+  const concurrentValue = numericValue(form.target_concurrent_requests) ?? selectedFleet?.tier_concurrent_requests ?? selectedFleet?.max_concurrent_at_reference_ctx ?? 1;
   const compareGpuIds = useMemo(() => {
     const filtered = gpus.filter((gpu) => {
       const vendorOk = compareVendor === 'all' || gpu.vendor === compareVendor;
@@ -180,35 +203,31 @@ export function App() {
       }
 
       const currentModelStillVisible = modelOptions.some((model) => model.id === current.model_id);
-      if (!currentModelStillVisible) {
-        return { ...current, source: value, model_id: '' };
-      }
-      return { ...current, source: value };
+      return {
+        ...current,
+        source: value,
+        model_id: currentModelStillVisible ? current.model_id : modelOptions[0]?.id ?? '',
+      };
     });
   }
 
   function updateModelVendor(value: string) {
+    const nextModels = itemsForGroup(modelGroups, value);
     setModelVendor(value);
-    setForm((current) => ({ ...current, source: 'builtin', model_id: '' }));
+    setForm((current) => ({ ...current, source: 'builtin', model_id: nextModels[0]?.id ?? '' }));
   }
 
   function updateGpuVendor(value: string) {
+    const nextGpus = itemsForGroup(gpuGroups, value);
+    const firstGpu = nextGpus[0]?.id;
     setGpuVendor(value);
+    if (firstGpu) {
+      setForm((current) => ({ ...current, gpu: firstGpu, gpus: [firstGpu] }));
+    }
   }
 
   function updatePrimaryGpu(gpuId: string) {
     setForm((current) => ({ ...current, gpu: gpuId, gpus: gpuId ? [gpuId] : [] }));
-  }
-
-  function updateGpuSelection(gpuId: string, checked: boolean) {
-    setForm((current) => {
-      const currentGpus = current.gpus.length ? current.gpus : current.gpu ? [current.gpu] : [];
-      const nextGpus = checked
-        ? [...currentGpus, gpuId].filter((gpu, index, all) => all.indexOf(gpu) === index).slice(0, 64)
-        : currentGpus.filter((gpu) => gpu !== gpuId);
-      const boundedGpus = nextGpus.length ? nextGpus : currentGpus;
-      return { ...current, gpu: boundedGpus[0] ?? '', gpus: boundedGpus };
-    });
   }
 
   function submit(event: FormEvent) {
@@ -231,6 +250,13 @@ export function App() {
     await runEvaluation(nextForm);
   }
 
+  function resetForm() {
+    setForm(DEFAULT_FORM);
+    setModelVendor('Qwen');
+    setGpuVendor('NVIDIA');
+    void runEvaluation(DEFAULT_FORM);
+  }
+
   function copyCommand() {
     if (!command) return;
     void navigator.clipboard.writeText(command).then(() => {
@@ -239,258 +265,361 @@ export function App() {
     });
   }
 
+  const providerOptions: SelectOption[] = gpuGroups.length
+    ? gpuGroups.map((group) => ({ value: group.label, label: group.label }))
+    : [{ value: gpuVendor, label: gpuVendor }];
+  const modelVendorOptions: SelectOption[] = modelGroups.length
+    ? modelGroups.map((group) => ({ value: group.label, label: modelVendorOptionLabel(group) }))
+    : [{ value: modelVendor, label: modelVendor }];
+  const builtinModelOptions: SelectOption[] = modelOptions.map((model) => ({
+    value: model.id,
+    label: model.id,
+    sublabel: model.mentioned_by?.length ? model.mentioned_by.join(' + ') : model.preferred_source ?? undefined,
+    badge: model.preferred_source ? <span className="miniBadge">{model.preferred_source}</span> : undefined,
+  }));
+  const gpuModelOptions: SelectOption[] = (gpuOptions.length ? gpuOptions : selectedGpu ? [selectedGpu] : []).map((gpu) => ({
+    value: gpu.id,
+    label: gpu.id,
+    sublabel: gpu.memory_gb
+      ? `${gpu.memory_gb} GB VRAM · ${gpu.memory_bandwidth_gbps ?? '-'} GB/s · ${gpu.fp16_tflops ?? '-'} TF`
+      : undefined,
+  }));
+
   return (
     <div className="appShell">
-      <header className="topBar">
-        <div className="brand">
-          <div className="brandMark">
-            <Cpu size={22} />
+      <header className="appHeader">
+        <div className="headerInner">
+          <div className="brand">
+            <div className="brandMark">
+              <Cpu size={17} />
+            </div>
+            <div className="brandText">
+              <span>LLM VRAM Calculator</span>
+              <b>v4.0</b>
+            </div>
+            <span className="crumb">
+              <ChevronRight size={14} />
+              {selectedModelLabel}
+            </span>
           </div>
-          <div>
-            <h1>llm-infer-cal</h1>
-            <p>LLM 推理硬件计算器</p>
+          <div className="headerChips">
+            <span>{selectedGpu?.id ?? form.gpu}</span>
+            <span>{form.gpu_count || selectedFleet?.gpu_count || 1}× GPU</span>
+            <span>{form.engine}</span>
           </div>
         </div>
       </header>
 
-      <nav className="viewTabs" aria-label="主视图">
-        <button type="button" className={activeTab === 'calculator' ? 'active' : ''} onClick={() => setActiveTab('calculator')}>
-          计算器
-        </button>
-        <button type="button" className={activeTab === 'compare' ? 'active' : ''} onClick={() => setActiveTab('compare')}>
-          GPU 对比
-        </button>
-      </nav>
-
-      {error ? (
-        <div className="errorBanner">
-          <AlertTriangle size={18} />
-          <span>{error}</span>
+      <main className="pageBody">
+        <div className="heroRow">
+          <div>
+            <h1>GPU Memory & Performance Estimator</h1>
+            <p>
+              估算 LLM 推理显存、TTFT、tok/s 和多 GPU 方案。界面按 v0 calculator 的 light 风格组织，计算仍使用本项目后端。
+            </p>
+          </div>
+          <nav className="viewTabs" aria-label="主视图">
+            <button type="button" className={activeTab === 'calculator' ? 'active' : ''} onClick={() => setActiveTab('calculator')}>
+              <Calculator size={15} />
+              Calculator
+            </button>
+            <button type="button" className={activeTab === 'compare' ? 'active' : ''} onClick={() => setActiveTab('compare')}>
+              <GitCompare size={15} />
+              Compare GPUs
+            </button>
+          </nav>
         </div>
-      ) : null}
 
-      <main className="workspace">
-        <form className="controlPanel" onSubmit={submit}>
-          <SectionHeader icon={<Settings2 size={18} />} title="配置" />
+        {error ? (
+          <div className="errorBanner">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+        ) : null}
 
-          <div className="fieldStack">
-            <Segmented
-              label="模型来源"
-              options={sourceOptions}
-              value={form.source}
-              onChange={updateSource}
-            />
-
-            {form.source === 'builtin' ? (
-              <div className="twoCol">
-                <label className="field">
-                  <span>模型厂商</span>
-                  <select
-                    data-testid="model-vendor-select"
-                    value={modelVendor}
-                    onChange={(event) => updateModelVendor(event.target.value)}
-                  >
-                    {modelGroups.map((group) => (
-                      <option key={group.label} value={group.label}>
-                        {modelVendorOptionLabel(group)}
-                      </option>
-                    ))}
-                    {!modelGroups.length ? <option value={modelVendor}>{modelVendor}</option> : null}
-                  </select>
-                </label>
-
-                <label className="field">
-                  <span>内置模型</span>
-                  <select
-                    data-testid="builtin-model-select"
-                    value={form.model_id}
-                    onChange={(event) => updateField('model_id', event.target.value)}
-                  >
-                    <option value="">请选择模型</option>
-                    {modelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.id}
-                      </option>
-                    ))}
-                    {!modelOptions.length && form.model_id ? <option value={form.model_id}>{form.model_id}</option> : null}
-                  </select>
-                </label>
-              </div>
-            ) : (
-              <label className="field">
-                <span>模型 ID</span>
-                <input
-                  data-testid="remote-model-id-input"
-                  value={form.model_id}
-                  placeholder="例如 Qwen/Qwen3-30B-A3B"
-                  onChange={(event) => updateField('model_id', event.target.value)}
-                />
-              </label>
-            )}
-
-            <div className="twoCol">
-              <label className="field">
-                <span>GPU 厂商</span>
-                <select data-testid="gpu-vendor-select" value={gpuVendor} onChange={(event) => updateGpuVendor(event.target.value)}>
-                  {gpuGroups.map((group) => (
-                    <option key={group.label} value={group.label}>
-                      {gpuVendorOptionLabel(group)}
-                    </option>
-                  ))}
-                  {!gpuGroups.length ? <option value={gpuVendor}>{gpuVendor}</option> : null}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>GPU 型号</span>
-                <GpuPicker options={gpuOptions} selected={selectedGpuIds} onSelectPrimary={updatePrimaryGpu} onToggle={updateGpuSelection} />
-              </label>
-            </div>
-
-            <div className="twoCol">
-              <Segmented
-                label="引擎"
-                options={engineOptions}
-                value={form.engine}
-                onChange={(value) => updateField('engine', value)}
-              />
-
-              <NumberField
-                label="上下文长度"
-                value={form.context_length}
-                onChange={(value) => updateField('context_length', value)}
-              />
-            </div>
-
-            <details className="advancedPanel" data-testid="performance-settings">
-              <summary>
-                <span>
-                  <ChevronDown className="disclosureIcon" size={16} />
-                  性能参数
-                </span>
-                <strong>{tuningSettings.length}</strong>
-              </summary>
-              <div className="advancedGrid">
-                {tuningSettings.map((setting) =>
-                  setting.control === 'range' ? (
-                    <RangeField
-                      key={setting.key}
-                      label={setting.label}
-                      value={form[setting.key]}
-                      min={setting.min ?? '0'}
-                      max={setting.max ?? '1'}
-                      step={setting.step ?? '0.05'}
-                      onChange={(value) => updateField(setting.key, value)}
+        {activeTab === 'calculator' ? (
+          <form className="calculatorGrid" onSubmit={submit}>
+            <section className="shellCard configCard">
+              <PanelTitle dot="primary" title="Configuration" />
+              <div className="configBody">
+                <ConfigSection icon={<Cpu size={16} />} title="GPU Configuration">
+                  <Field label="Provider">
+                    <SearchableSelect options={providerOptions} value={gpuVendor} onValueChange={updateGpuVendor} searchPlaceholder="Search provider..." />
+                  </Field>
+                  <Field label="GPU Model" hint="选择用于推理的 GPU。显存、带宽、FP16 TFLOPS 会影响估算。">
+                    <GpuPicker options={gpuModelOptions} selected={selectedGpuId} onSelectPrimary={updatePrimaryGpu} />
+                  </Field>
+                  <SpecGrid
+                    items={[
+                      { label: 'VRAM', value: selectedGpu?.memory_gb ? `${selectedGpu.memory_gb} GB` : '-' },
+                      { label: 'Mem BW', value: selectedGpu?.memory_bandwidth_gbps ? `${selectedGpu.memory_bandwidth_gbps} GB/s` : '-' },
+                      { label: 'FP16 TF', value: selectedGpu?.fp16_tflops ? `${selectedGpu.fp16_tflops} TF` : '-' },
+                    ]}
+                  />
+                  <Field label="Number of GPUs" hint="空值表示由 planner 自动推荐；选择数值会强制 GPU 数。">
+                    <SearchableSelect
+                      options={gpuCountOptions.map((count) => ({
+                        value: count,
+                        label: count ? `${count}× GPU${count === '1' ? '' : 's'}` : '自动推荐',
+                        sublabel: count && selectedGpu?.memory_gb ? `${Number(count) * selectedGpu.memory_gb} GB total VRAM` : undefined,
+                      }))}
+                      value={form.gpu_count}
+                      onValueChange={(value) => updateField('gpu_count', value)}
                     />
+                  </Field>
+                </ConfigSection>
+
+                <Separator />
+
+                <ConfigSection icon={<LayoutGrid size={16} />} title="Model">
+                  <div className="twoCol">
+                    <Field label="Source">
+                      <SearchableSelect
+                        options={sourceOptions.map((option) => ({ value: option.value, label: option.label }))}
+                        value={form.source}
+                        onValueChange={(value) => updateSource(value as EvaluateForm['source'])}
+                      />
+                    </Field>
+                    <Field label="Family">
+                      <SearchableSelect options={modelVendorOptions} value={modelVendor} onValueChange={updateModelVendor} disabled={form.source !== 'builtin'} />
+                    </Field>
+                  </div>
+
+                  {form.source === 'builtin' ? (
+                    <Field label={`Model (${builtinModelOptions.length} available)`}>
+                      <SearchableSelect
+                        options={builtinModelOptions}
+                        value={form.model_id}
+                        onValueChange={(value) => updateField('model_id', value)}
+                        placeholder="请选择模型"
+                        searchPlaceholder="Type model name..."
+                        maxHeight={360}
+                      />
+                    </Field>
                   ) : (
-                    <NumberField
-                      key={setting.key}
-                      label={setting.label}
-                      value={form[setting.key]}
-                      onChange={(value) => updateField(setting.key, value)}
-                    />
-                  ),
-                )}
-              </div>
-            </details>
+                    <Field label="Model ID">
+                      <input
+                        data-testid="remote-model-id-input"
+                        value={form.model_id}
+                        placeholder="输入 HuggingFace / ModelScope 模型 ID"
+                        onChange={(event) => updateField('model_id', event.target.value)}
+                      />
+                    </Field>
+                  )}
 
-            <details className="advancedPanel" data-testid="advanced-settings">
-              <summary>
-                <span>
-                  <ChevronDown className="disclosureIcon" size={16} />
-                  高级设置
-                </span>
-                <strong>{advancedControls.length}</strong>
-              </summary>
-              <div className="advancedGrid">
-                {advancedControls.map((setting) =>
-                  setting.control === 'checkbox' ? (
-                    <CheckboxField
-                      key={setting.key}
-                      label={setting.label}
-                      checked={form[setting.key]}
-                      onChange={(value) => updateField(setting.key, value)}
-                    />
-                  ) : (
-                    <NumberField
-                      key={setting.key}
-                      label={setting.label}
-                      value={form[setting.key]}
-                      onChange={(value) => updateField(setting.key, value)}
-                    />
-                  ),
-                )}
-                <div className="advancedGroup">
-                  <div className="advancedGroupTitle">Inference Optimizations</div>
-                  <label className="field">
-                    <span>KV Cache 精度</span>
-                    <select value={form.kv_cache_bits} onChange={(event) => updateField('kv_cache_bits', event.target.value)}>
-                      {kvPrecisionOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <CheckboxField
-                    label="Paged Attention（KV 显存 × 0.75）"
+                  <ModelSpecGrid report={report} params={params} activeParams={activeParams} />
+                </ConfigSection>
+
+                <Separator />
+
+                <ConfigSection icon={<Database size={16} />} title="Precision">
+                  <div className="twoCol">
+                    <Field label="Engine">
+                      <SearchableSelect
+                        options={engineOptions.map((option) => ({ value: option.value, label: option.label }))}
+                        value={form.engine}
+                        onValueChange={(value) => updateField('engine', value as EvaluateForm['engine'])}
+                      />
+                    </Field>
+                    <Field label="KV Cache Precision">
+                      <SearchableSelect
+                        options={kvPrecisionOptions.map((option) => ({ value: option.value, label: option.label, sublabel: option.sublabel }))}
+                        value={form.kv_cache_bits}
+                        onValueChange={(value) => updateField('kv_cache_bits', value)}
+                      />
+                    </Field>
+                  </div>
+                </ConfigSection>
+
+                <Separator />
+
+                <ConfigSection icon={<Settings2 size={16} />} title="Context & Workload">
+                  <SliderWithInput
+                    label="Context Window"
+                    min={512}
+                    max={contextMax}
+                    step={512}
+                    value={contextValue}
+                    onValueChange={(value) => updateField('context_length', String(value))}
+                    format={formatCompact}
+                    unit="tok"
+                    markers={[512, Math.floor(contextMax * 0.25), Math.floor(contextMax * 0.5), contextMax]}
+                  />
+                  <SliderWithInput
+                    label="Concurrent Users"
+                    min={1}
+                    max={4096}
+                    step={1}
+                    value={Math.max(1, Math.min(4096, concurrentValue))}
+                    onValueChange={(value) => updateField('target_concurrent_requests', String(value))}
+                    format={formatCompact}
+                    unit="users"
+                    markers={[1, 32, 256, 1024, 4096]}
+                  />
+                </ConfigSection>
+
+                <Separator />
+
+                <ConfigSection icon={<Zap size={16} />} title="Inference Optimizations">
+                  <SwitchField
+                    label="Paged Attention"
+                    description="减少 KV cache 碎片和开销，后端按约 0.75 系数估算。"
                     checked={form.paged_attention}
                     onChange={(value) => updateField('paged_attention', value)}
                   />
-                  <TextField
-                    label="Draft/EAGLE 模型 ID"
-                    value={form.speculative_draft_model_id}
-                    placeholder="可选：独立 draft model"
-                    onChange={(value) => updateField('speculative_draft_model_id', value)}
-                  />
-                  <NumberField
-                    label="Speculative 额外权重 GiB"
-                    value={form.speculative_extra_weight_gb}
-                    onChange={(value) => updateField('speculative_extra_weight_gb', value)}
-                  />
-                  <NumberField
-                    label="CPU Offload / GPU GiB"
-                    value={form.cpu_offload_gb}
-                    onChange={(value) => updateField('cpu_offload_gb', value)}
-                  />
-                </div>
-                {form.llm_review
-                  ? reviewerSettings.map((setting) => (
+                  <details className="advancedPanel">
+                    <summary>
+                      <span>
+                        <ChevronDown className="disclosureIcon" size={16} />
+                        Speculative / Draft / EAGLE
+                      </span>
+                    </summary>
+                    <div className="advancedGrid">
                       <TextField
-                        key={setting.key}
-                        label={setting.label}
-                        value={form[setting.key]}
-                        type={setting.type ?? 'text'}
-                        placeholder={setting.placeholder}
-                        onChange={(value) => updateField(setting.key, value)}
+                        label="Draft/EAGLE 模型 ID"
+                        value={form.speculative_draft_model_id}
+                        placeholder="可选：独立 draft model"
+                        onChange={(value) => updateField('speculative_draft_model_id', value)}
                       />
-                    ))
-                  : null}
+                      <NumberField
+                        label="Speculative 额外权重 GiB"
+                        value={form.speculative_extra_weight_gb}
+                        onChange={(value) => updateField('speculative_extra_weight_gb', value)}
+                      />
+                    </div>
+                  </details>
+                  <details className="advancedPanel" data-testid="advanced-settings">
+                    <summary>
+                      <span>
+                        <ChevronDown className="disclosureIcon" size={16} />
+                        高级设置
+                      </span>
+                    </summary>
+                    <div className="advancedGrid">
+                      {advancedControls.map((setting) =>
+                        setting.control === 'checkbox' ? (
+                          <CheckboxField
+                            key={setting.key}
+                            label={setting.label}
+                            checked={form[setting.key]}
+                            onChange={(value) => updateField(setting.key, value)}
+                          />
+                        ) : (
+                          <NumberField
+                            key={setting.key}
+                            label={setting.label}
+                            value={form[setting.key]}
+                            onChange={(value) => updateField(setting.key, value)}
+                          />
+                        ),
+                      )}
+                      <NumberField
+                        label="CPU Offload / GPU GiB"
+                        value={form.cpu_offload_gb}
+                        onChange={(value) => updateField('cpu_offload_gb', value)}
+                      />
+                      {form.llm_review
+                        ? reviewerSettings.map((setting) => (
+                            <TextField
+                              key={setting.key}
+                              label={setting.label}
+                              value={form[setting.key]}
+                              type={setting.type ?? 'text'}
+                              placeholder={setting.placeholder}
+                              onChange={(value) => updateField(setting.key, value)}
+                            />
+                          ))
+                        : null}
+                    </div>
+                  </details>
+                </ConfigSection>
+
+                <button className="primaryButton" type="submit" disabled={evaluating || !form.model_id.trim() || !selectedGpuIds.length}>
+                  {evaluating ? <RefreshCcw className="spin" size={17} /> : <Play size={17} />}
+                  <span>{evaluating ? '计算中' : '开始评估'}</span>
+                </button>
               </div>
-            </details>
-          </div>
+            </section>
 
-          <button className="primaryButton" type="submit" disabled={evaluating || !form.model_id.trim() || !selectedGpuIds.length}>
-            {evaluating ? <RefreshCcw className="spin" size={18} /> : <Play size={18} />}
-            <span>{evaluating ? '计算中' : '开始评估'}</span>
-          </button>
-        </form>
+            <section className="shellCard resultCard">
+              <PanelTitle dot="success" title="Estimates">
+                <button type="button" className="ghostButton" onClick={resetForm}>
+                  Reset to defaults
+                </button>
+              </PanelTitle>
+              <div className="resultBody">
+                <FitStatus option={selectedFleet} hardware={report?.hardware ?? selectedGpu} />
+                <VramOverview option={selectedFleet} hardware={report?.hardware ?? selectedGpu} paged={form.paged_attention} />
+                <MetricCards
+                  selectedFleet={selectedFleet}
+                  weightBytes={weightBytes}
+                  prefillMs={prefillMs}
+                  clusterTps={clusterTps}
+                  maxConcurrent={maxConcurrent}
+                  form={form}
+                  hardware={report?.hardware ?? selectedGpu}
+                />
+                <SupportCallouts
+                  report={report}
+                  form={form}
+                  engineSupport={engineSupport}
+                  activeParams={activeParams}
+                  params={params}
+                />
 
-        <section className="resultSurface">
-          <div className="resultHeader">
-            <div>
-              <p className="eyebrow">{report?.model?.source ?? form.source}</p>
-              <h2>{report?.model?.id ?? form.model_id}</h2>
-            </div>
-            <div className="resultBadges">
-              <LabelBadge label={engineSupport === 'full' ? '完整支持' : engineSupport} tone={engineSupport === 'full' ? 'good' : 'warn'} />
-              <LabelBadge label={selectedGpu?.fp8_support ? 'FP8' : 'BF16/FP16'} tone="neutral" />
-            </div>
-          </div>
+                <section className="innerPanel">
+                  <SectionTitle title="VRAM Breakdown" />
+                  <MemoryBreakdown option={selectedFleet} hardware={report?.hardware ?? selectedGpu} />
+                  <div className="kvList">
+                    {kvRows.map((row) => (
+                      <div className="kvRow" key={row.context_tokens}>
+                        <span>{formatNumber(row.context_tokens)} ctx</span>
+                        <strong>{formatBytes(row.bytes?.value)}</strong>
+                        <small>{labelText(row.bytes?.label)}</small>
+                      </div>
+                    ))}
+                    {activationRows.slice(0, 1).map((row) => (
+                      <div className="kvRow" key={`activation-${row.context_tokens}`}>
+                        <span>activation working set</span>
+                        <strong>{formatBytes(row.bytes?.value)}</strong>
+                        <small>{labelText(row.bytes?.label)}</small>
+                      </div>
+                    ))}
+                  </div>
+                </section>
 
-          {activeTab === 'compare' ? (
-            <section className="panel comparisonPanel">
-              <SectionHeader icon={<Activity size={18} />} title="GPU 对比" />
+                <div className="contentGrid">
+                  <section className="innerPanel">
+                    <SectionTitle title="Fleet Options" />
+                    <FleetTable options={report?.fleet?.options ?? []} />
+                    <p className="noteText">{report?.fleet?.constraint_note_zh ?? report?.fleet?.constraint_note_en ?? selectedGpu?.notes_zh}</p>
+                  </section>
+
+                  <section className="innerPanel">
+                    <SectionTitle title="启动命令" />
+                    <div className="commandBox">
+                      <pre>{command || '等待评估结果'}</pre>
+                      <button type="button" className="iconButton" onClick={copyCommand} disabled={!command} aria-label="复制启动命令">
+                        {copied ? <CheckCircle2 size={18} /> : <Clipboard size={18} />}
+                      </button>
+                    </div>
+                    <OptimizationList report={report} />
+                  </section>
+                </div>
+
+                <section className="innerPanel">
+                  <SectionTitle title="Formula Reference" />
+                  <FormulaReference report={report} form={form} activeParams={activeParams} />
+                </section>
+
+                <InferenceSimulation prefillMs={prefillMs} clusterTps={clusterTps} modelId={selectedModelLabel} />
+              </div>
+            </section>
+          </form>
+        ) : (
+          <section className="shellCard compareShell">
+            <PanelTitle dot="success" title="Compare GPUs" />
+            <div className="compareBody">
               <CompareControls
                 vendors={gpuGroups.map((group) => group.label)}
                 vendor={compareVendor}
@@ -504,78 +633,44 @@ export function App() {
                 disabled={evaluating || !form.model_id.trim()}
               />
               <ComparisonTable reports={comparisonReports} />
-            </section>
-          ) : null}
-
-          <div className="metricGrid">
-            <Metric icon={<Cpu size={18} />} label="推荐 GPU" value={selectedFleet?.gpu_count ? `${selectedFleet.gpu_count} 张` : '-'} detail={tierText(selectedFleet?.tier)} />
-            <Metric icon={<Activity size={18} />} label="并发上限" value={formatNumber(maxConcurrent)} detail="K/L 取小" />
-            <Metric icon={<Layers size={18} />} label="权重显存" value={formatBytes(weightBytes)} detail={labelText(report?.weights?.safetensors_total_bytes?.label)} />
-            <Metric icon={<Gauge size={18} />} label="参数量" value={formatNumber(params)} detail={labelText(report?.weights?.params_estimated?.label)} />
-            <Metric icon={<Zap size={18} />} label="Decode 集群" value={`${formatFloat(clusterTps, 1)} tok/s`} detail="估算吞吐" />
-            <Metric icon={<RefreshCcw size={18} />} label="Prefill" value={formatMs(prefillMs)} detail={`${form.input_tokens || 2000} tokens`} />
-          </div>
-
-          {comparisonReports.length >= 2 ? (
-            <section className="panel comparisonPanel">
-              <SectionHeader icon={<Activity size={18} />} title="GPU 对比" />
-              <ComparisonTable reports={comparisonReports} />
-            </section>
-          ) : null}
-
-          <div className="contentGrid">
-            <section className="panel">
-              <SectionHeader icon={<Layers size={18} />} title="VRAM Breakdown" />
-              <MemoryBreakdown option={selectedFleet} hardware={report?.hardware ?? selectedGpu} />
-              <div className="kvList">
-                {kvRows.map((row) => (
-                  <div className="kvRow" key={row.context_tokens}>
-                    <span>{formatNumber(row.context_tokens)} ctx</span>
-                    <strong>{formatBytes(row.bytes?.value)}</strong>
-                    <small>{labelText(row.bytes?.label)}</small>
-                  </div>
-                ))}
-                {activationRows.slice(0, 1).map((row) => (
-                  <div className="kvRow" key={`activation-${row.context_tokens}`}>
-                    <span>activation working set</span>
-                    <strong>{formatBytes(row.bytes?.value)}</strong>
-                    <small>{labelText(row.bytes?.label)}</small>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel">
-              <SectionHeader icon={<Activity size={18} />} title="方案表" />
-              <FleetTable options={report?.fleet?.options ?? []} />
-              <p className="noteText">{report?.fleet?.constraint_note_zh ?? report?.fleet?.constraint_note_en ?? selectedGpu?.notes_zh}</p>
-            </section>
-          </div>
-
-          <div className="contentGrid">
-            <section className="panel">
-              <SectionHeader icon={<Gauge size={18} />} title="Formula Reference" />
-              <FormulaReference report={report} form={form} activeParams={activeParams} />
-            </section>
-
-            <section className="panel">
-              <SectionHeader icon={<Terminal size={18} />} title="启动命令" />
-              <div className="commandBox">
-                <pre>{command || '等待评估结果'}</pre>
-                <button type="button" className="iconButton" onClick={copyCommand} disabled={!command} aria-label="复制启动命令">
-                  {copied ? <CheckCircle2 size={18} /> : <Clipboard size={18} />}
-                </button>
-              </div>
-              <OptimizationList report={report} />
-            </section>
-          </div>
-        </section>
+            </div>
+          </section>
+        )}
       </main>
+
+      <footer className="pageFooter">
+        <p>Estimates are physics-based approximations. Real-world performance varies by framework, driver version, and system memory bandwidth.</p>
+        <a href="https://github.com/Shun-Calvin/llm-vram-calculator" target="_blank" rel="noopener noreferrer">
+          <Github size={14} />
+          Shun-Calvin/llm-vram-calculator
+        </a>
+      </footer>
     </div>
   );
 }
 
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+function PanelTitle({ dot, title, children }: { dot: 'primary' | 'success'; title: string; children?: ReactNode }) {
+  return (
+    <div className="panelTitle">
+      <div className="panelTitleText">
+        <span className={`titleDot ${dot}`} />
+        <p>{title}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ConfigSection({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <section className="configSection">
+      <SectionHeader icon={icon} title={title} />
+      <div className="sectionFields">{children}</div>
+    </section>
+  );
+}
+
+function SectionHeader({ icon, title }: { icon: ReactNode; title: string }) {
   return (
     <div className="sectionHeader">
       {icon}
@@ -584,32 +679,141 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
   );
 }
 
-function Segmented<T extends string>({
-  label,
+function SectionTitle({ title }: { title: string }) {
+  return <p className="sectionTitle">{title}</p>;
+}
+
+function Separator() {
+  return <div className="separator" />;
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="field">
+      <span>
+        {label}
+        {hint ? (
+          <span className="infoHint" title={hint}>
+            <Info size={13} />
+          </span>
+        ) : null}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function SearchableSelect({
   options,
   value,
-  onChange,
+  onValueChange,
+  placeholder = 'Select...',
+  searchPlaceholder = 'Search...',
+  disabled = false,
+  maxHeight = 320,
 }: {
-  label: string;
-  options: readonly { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
+  options: SelectOption[];
+  value: string;
+  onValueChange: (value: string) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+  disabled?: boolean;
+  maxHeight?: number;
 }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = options.find((option) => option.value === value);
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return options;
+    return options.filter((option) => `${option.label} ${option.sublabel ?? ''}`.toLowerCase().includes(normalized));
+  }, [options, query]);
+
+  useEffect(() => {
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    }
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      window.setTimeout(() => inputRef.current?.focus(), 20);
+    }
+  }, [open]);
+
+  function selectValue(nextValue: string) {
+    onValueChange(nextValue);
+    setOpen(false);
+    setQuery('');
+  }
+
   return (
-    <div className="field">
-      <span>{label}</span>
-      <div className="segmented">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={value === option.value ? 'active' : ''}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+    <div className="searchSelect" ref={containerRef}>
+      <button type="button" className="selectTrigger" disabled={disabled} onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        <span>
+          {selected ? (
+            <>
+              <b>{selected.label}</b>
+              {selected.badge}
+            </>
+          ) : (
+            <em>{placeholder}</em>
+          )}
+        </span>
+        <ChevronDown size={15} />
+      </button>
+      {open ? (
+        <div className="selectMenu" style={{ maxHeight }}>
+          <div className="selectSearch">
+            <Search size={14} />
+            <input
+              ref={inputRef}
+              value={query}
+              placeholder={searchPlaceholder}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setOpen(false);
+                  setQuery('');
+                }
+                if (event.key === 'Enter' && filtered.length === 1) {
+                  selectValue(filtered[0].value);
+                }
+              }}
+            />
+            {query ? (
+              <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">
+                <X size={13} />
+              </button>
+            ) : null}
+          </div>
+          <div className="selectList">
+            {filtered.length ? (
+              filtered.map((option) => (
+                <button key={option.value || option.label} type="button" disabled={option.disabled} className={option.value === value ? 'selected' : ''} onClick={() => selectValue(option.value)}>
+                  <span className="checkSlot">{option.value === value ? <Check size={14} /> : null}</span>
+                  <span className="optionText">
+                    <span>{option.label}</span>
+                    {option.sublabel ? <small>{option.sublabel}</small> : null}
+                  </span>
+                  {option.badge}
+                </button>
+              ))
+            ) : (
+              <p className="emptyText">No results for "{query}"</p>
+            )}
+          </div>
+          {filtered.length ? <div className="selectCount">{filtered.length} result{filtered.length === 1 ? '' : 's'}</div> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -618,50 +822,154 @@ function GpuPicker({
   options,
   selected,
   onSelectPrimary,
-  onToggle,
 }: {
-  options: GpuSummary[];
-  selected: string[];
+  options: SelectOption[];
+  selected: string;
   onSelectPrimary: (gpuId: string) => void;
-  onToggle: (gpuId: string, checked: boolean) => void;
 }) {
-  const visibleOptions: GpuSummary[] = options.length ? options : selected.map((id) => ({ id }));
-  const selectedSet = new Set(selected);
-
   return (
     <div className="gpuPicker" data-testid="gpu-model-picker">
-      <select value={selected[0] ?? ''} onChange={(event) => onSelectPrimary(event.target.value)}>
-        {visibleOptions.map((gpu) => (
-          <option key={gpu.id} value={gpu.id}>
-            {gpu.id}
-            {gpu.memory_gb ? ` · ${gpu.memory_gb}GB` : ''}
-          </option>
-        ))}
-      </select>
-      <div className="selectedGpuList">
-        {selected.map((gpu) => (
+      <SearchableSelect options={options} value={selected} onValueChange={onSelectPrimary} searchPlaceholder="Type to search GPUs..." maxHeight={300} />
+    </div>
+  );
+}
+
+function SpecGrid({ items }: { items: Array<{ label: string; value: string }> }) {
+  return (
+    <div className="specGrid">
+      {items.map((item) => (
+        <div key={item.label}>
+          <p>{item.label}</p>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ModelSpecGrid({ report, params, activeParams }: { report: Report | null; params?: number; activeParams?: number }) {
+  const architecture = report?.architecture ?? {};
+  const attention = architecture.attention ?? {};
+  const isMoe = !!params && !!activeParams && activeParams < params;
+  return (
+    <SpecGrid
+      items={[
+        { label: isMoe ? 'Total Params' : 'Params', value: formatNumber(params) },
+        {
+          label: isMoe ? 'Active Params' : 'Layers',
+          value: isMoe ? formatNumber(activeParams) : formatNumber(architecture.num_hidden_layers ?? architecture.num_layers ?? architecture.layers),
+        },
+        { label: 'KV Heads', value: formatNumber(attention.num_kv_heads ?? architecture.num_key_value_heads) },
+      ]}
+    />
+  );
+}
+
+function SliderWithInput({
+  label,
+  min,
+  max,
+  step,
+  value,
+  onValueChange,
+  format,
+  unit,
+  markers,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onValueChange: (value: number) => void;
+  format: (value: number) => string;
+  unit: string;
+  markers: number[];
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  function commit() {
+    const parsed = parseCompact(draft);
+    setEditing(false);
+    if (parsed == null) {
+      setDraft('');
+      return;
+    }
+    const bounded = Math.max(min, Math.min(max, parsed));
+    const snapped = Math.round(bounded / step) * step;
+    onValueChange(snapped);
+    setDraft('');
+  }
+
+  return (
+    <div className="sliderField">
+      <div className="sliderLabel">
+        <span>{label}</span>
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commit();
+              if (event.key === 'Escape') {
+                setEditing(false);
+                setDraft('');
+              }
+            }}
+          />
+        ) : (
           <button
-            className="selectedGpuChip"
-            key={gpu}
             type="button"
-            disabled={selectedSet.has(gpu) && selected.length <= 1}
-            onClick={() => onToggle(gpu, false)}
-            title="从当前选择中移除"
+            onClick={() => {
+              setEditing(true);
+              setDraft(String(value));
+            }}
           >
-            {gpu}
+            {format(value)} <small>{unit}</small>
           </button>
+        )}
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onValueChange(Number(event.target.value))} />
+      <div className="rangeMarkers">
+        {markers.map((marker) => (
+          <span key={marker}>{format(marker)}</span>
         ))}
       </div>
     </div>
   );
 }
 
+function SwitchField({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="switchField">
+      <span>
+        <b>{label}</b>
+        <small>{description}</small>
+      </span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <i />
+    </label>
+  );
+}
+
 function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <label className="field">
-      <span>{label}</span>
+    <Field label={label}>
       <input inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
+    </Field>
   );
 }
 
@@ -679,10 +987,9 @@ function TextField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="field">
-      <span>{label}</span>
+    <Field label={label}>
       <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
-    </label>
+    </Field>
   );
 }
 
@@ -695,108 +1002,178 @@ function CheckboxField({ label, checked, onChange }: { label: string; checked: b
   );
 }
 
-function RangeField({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  min: string;
-  max: string;
-  step: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field rangeField">
-      <span>
-        {label}
-        <strong>{value}</strong>
-      </span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
-  );
-}
+function FitStatus({ option, hardware }: { option?: FleetOption; hardware?: GpuSummary | null }) {
+  const memoryBytes = (hardware?.memory_gb ?? 0) * 1_000_000_000;
+  const required = option?.required_bytes_per_gpu_at_tier ?? requiredBytes(option);
+  const usage = pct(required, memoryBytes);
+  const overflow = option ? !option.fits : false;
+  const tight = !overflow && usage > 85;
+  const tone = overflow ? 'overflow' : tight ? 'tight' : 'fits';
+  const label = overflow ? 'Insufficient VRAM' : tight ? 'Tight fit (>85%)' : 'Fits comfortably';
+  const Icon = overflow || tight ? AlertTriangle : CheckCircle2;
 
-function LabelBadge({ label, tone }: { label: string; tone: 'good' | 'warn' | 'neutral' }) {
-  return <span className={`labelBadge ${tone}`}>{label}</span>;
-}
-
-function CompareControls({
-  vendors,
-  vendor,
-  tier,
-  gpuCount,
-  selectedCount,
-  disabled,
-  onVendor,
-  onTier,
-  onGpuCount,
-  onRun,
-}: {
-  vendors: string[];
-  vendor: string;
-  tier: string;
-  gpuCount: string;
-  selectedCount: number;
-  disabled: boolean;
-  onVendor: (value: string) => void;
-  onTier: (value: string) => void;
-  onGpuCount: (value: string) => void;
-  onRun: () => void;
-}) {
   return (
-    <div className="compareControls">
-      <label className="field">
-        <span>Provider</span>
-        <select value={vendor} onChange={(event) => onVendor(event.target.value)}>
-          <option value="all">全部厂商</option>
-          {vendors.map((nextVendor) => (
-            <option key={nextVendor} value={nextVendor}>
-              {nextVendor}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="field">
-        <span>Tier</span>
-        <select value={tier} onChange={(event) => onTier(event.target.value)}>
-          <option value="all">{gpuTierLabel('all')}</option>
-          <option value="datacenter">{gpuTierLabel('datacenter')}</option>
-          <option value="prosumer">{gpuTierLabel('prosumer')}</option>
-          <option value="consumer">{gpuTierLabel('consumer')}</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>GPUs per node</span>
-        <select value={gpuCount} onChange={(event) => onGpuCount(event.target.value)}>
-          <option value="">自动推荐</option>
-          {[1, 2, 4, 8, 16, 32, 64].map((count) => (
-            <option key={count} value={String(count)}>
-              {count}× GPU
-            </option>
-          ))}
-        </select>
-      </label>
-      <button className="secondaryButton" type="button" onClick={onRun} disabled={disabled || selectedCount === 0}>
-        对比 {selectedCount} 张 GPU
-      </button>
+    <div className={`fitStatus ${tone}`}>
+      <Icon size={20} />
+      <div>
+        <strong>{label}</strong>
+        <p>
+          {formatBytes(required)} required / {formatBytes(memoryBytes)} available ({option?.gpu_count ?? 1}× {hardware?.id ?? 'GPU'})
+        </p>
+      </div>
     </div>
   );
 }
 
-function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: string; detail: string }) {
+function VramOverview({ option, hardware, paged }: { option?: FleetOption; hardware?: GpuSummary | null; paged: boolean }) {
+  const memoryBytes = (hardware?.memory_gb ?? 0) * 1_000_000_000;
+  const concurrent = option?.tier_concurrent_requests ?? 1;
+  const mainWeight = option?.main_weight_bytes_per_gpu ?? Math.max((option?.weight_bytes_per_gpu ?? 0) - (option?.speculative_weight_bytes_per_gpu ?? 0), 0);
+  const speculativeWeight = option?.speculative_weight_bytes_per_gpu ?? 0;
+  const kv = (option?.kv_bytes_per_request_per_gpu ?? option?.kv_bytes_per_request ?? 0) * concurrent;
+  const activation = option?.activation_bytes_per_request_per_gpu ?? 0;
+  const required = option?.required_bytes_per_gpu_at_tier ?? mainWeight + speculativeWeight + kv + activation;
+  const usage = pct(required, memoryBytes);
+  const overflow = option ? !option.fits : false;
+  const tight = !overflow && usage > 85;
+  const barClass = overflow ? 'overflow' : tight ? 'tight' : 'fits';
+
   return (
-    <div className="metric">
-      <div className="metricIcon">{icon}</div>
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{detail}</small>
+    <div className="vramOverview">
+      <div className="utilHeader">
+        <span>VRAM Utilization</span>
+        <strong>
+          {formatFloat(usage, 1)}% of {formatBytes(memoryBytes)}
+        </strong>
       </div>
+      <div className="utilTrack">
+        <div className={barClass} style={{ width: `${Math.min(usage, 100)}%` }} />
+      </div>
+      <div className="stackedTrack">
+        <div className="weight" style={{ width: `${pct(mainWeight, required)}%` }} />
+        {speculativeWeight > 0 ? <div className="speculative" style={{ width: `${pct(speculativeWeight, required)}%` }} /> : null}
+        <div className="kv" style={{ width: `${pct(kv, required)}%` }} />
+        <div className="activation" style={{ width: `${pct(activation, required)}%` }} />
+      </div>
+      <div className="legendList">
+        <Legend tone="weight" label={`Weights ${formatBytes(mainWeight)}`} percent={pct(mainWeight, required)} />
+        {speculativeWeight > 0 ? <Legend tone="speculative" label={`Draft ${formatBytes(speculativeWeight)}`} percent={pct(speculativeWeight, required)} /> : null}
+        <Legend tone="kv" label={`KV Cache ${formatBytes(kv)}${paged ? ' (paged)' : ''}`} percent={pct(kv, required)} />
+        <Legend tone="activation" label={`Activations ${formatBytes(activation)}`} percent={pct(activation, required)} />
+      </div>
+    </div>
+  );
+}
+
+function Legend({ tone, label, percent }: { tone: string; label: string; percent: number }) {
+  return (
+    <span>
+      <i className={tone} />
+      {label} <small>({formatFloat(percent, 0)}%)</small>
+    </span>
+  );
+}
+
+function MetricCards({
+  selectedFleet,
+  weightBytes,
+  prefillMs,
+  clusterTps,
+  maxConcurrent,
+  form,
+  hardware,
+}: {
+  selectedFleet?: FleetOption;
+  weightBytes?: number;
+  prefillMs?: number;
+  clusterTps?: number;
+  maxConcurrent?: number;
+  form: EvaluateForm;
+  hardware?: GpuSummary | null;
+}) {
+  const required = selectedFleet?.required_bytes_per_gpu_at_tier ?? requiredBytes(selectedFleet);
+  const concurrent = selectedFleet?.tier_concurrent_requests ?? maxConcurrent ?? 1;
+  const perUserTps = clusterTps && concurrent ? clusterTps / concurrent : clusterTps;
+  const modelWeightPerGpu = selectedFleet?.main_weight_bytes_per_gpu ?? selectedFleet?.weight_bytes_per_gpu ?? weightBytes;
+
+  return (
+    <div className="metricGrid">
+      <MetricCard
+        icon={<HardDrive size={17} />}
+        label="Total VRAM"
+        value={formatBytes(required)}
+        sub={`${selectedFleet?.gpu_count ?? 1}× ${hardware?.id ?? form.gpu}`}
+        accent
+      />
+      <MetricCard icon={<Clock size={17} />} label="Time to First Token" value={formatMs(prefillMs)} sub={`${form.input_tokens || 2000} prompt tokens`} />
+      <MetricCard
+        icon={<Zap size={17} />}
+        label="Tokens / Second"
+        value={`${formatFloat(perUserTps, 1)} tok/s`}
+        sub={`${formatFloat(clusterTps, 0)} tok/s total · ${formatNumber(maxConcurrent)} max concurrent`}
+      />
+      <MetricCard icon={<Layers size={17} />} label="Model Weights / GPU" value={formatBytes(modelWeightPerGpu)} sub="GPU resident model weights" />
+      <MetricCard icon={<Activity size={17} />} label="Recommended GPUs" value={selectedFleet?.gpu_count ? `${selectedFleet.gpu_count} 张` : '-'} sub={tierText(selectedFleet?.tier)} />
+      <MetricCard icon={<Gauge size={17} />} label="Engine Support" value={form.engine} sub="vLLM / SGLang command preview" />
+    </div>
+  );
+}
+
+function MetricCard({ icon, label, value, sub, accent = false }: { icon: ReactNode; label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`metricCard ${accent ? 'accent' : ''}`}>
+      <div>
+        {icon}
+        <span>{label}</span>
+      </div>
+      <strong>{value}</strong>
+      {sub ? <p>{sub}</p> : null}
+    </div>
+  );
+}
+
+function SupportCallouts({
+  report,
+  form,
+  engineSupport,
+  activeParams,
+  params,
+}: {
+  report: Report | null;
+  form: EvaluateForm;
+  engineSupport: string;
+  activeParams?: number;
+  params?: number;
+}) {
+  const isMoe = !!params && !!activeParams && activeParams < params;
+  const caveats = report?.engine_compatibility?.caveats_zh ?? report?.engine_compatibility?.caveats_en ?? [];
+  return (
+    <div className="calloutStack">
+      <div className={`callout ${engineSupport === 'full' ? 'success' : 'warning'}`}>
+        <CheckCircle2 size={16} />
+        <p>
+          <strong>{engineSupport === 'full' ? '完整支持' : `Engine support: ${engineSupport}`}</strong>
+          {caveats.length ? ` ${caveats[0]}` : ' 当前模型和引擎配置可生成启动命令。'}
+        </p>
+      </div>
+      {isMoe ? (
+        <div className="callout info">
+          <Layers size={16} />
+          <p>
+            <strong>MoE Calculation Notes:</strong> 权重显存按总参数常驻，Prefill/Decode 按 active params 估算。
+          </p>
+        </div>
+      ) : null}
+      {(form.paged_attention || form.speculative_draft_model_id || form.speculative_extra_weight_gb) ? (
+        <div className="callout info">
+          <Zap size={16} />
+          <p>
+            <strong>Inference Optimizations Active:</strong>
+            {form.paged_attention ? ' Paged Attention 已启用。' : ''}
+            {form.speculative_draft_model_id || form.speculative_extra_weight_gb ? ' Speculative / Draft 额外权重会进入 GPU resident weights。' : ''}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -874,6 +1251,64 @@ function FleetTable({ options }: { options: FleetOption[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function CompareControls({
+  vendors,
+  vendor,
+  tier,
+  gpuCount,
+  selectedCount,
+  disabled,
+  onVendor,
+  onTier,
+  onGpuCount,
+  onRun,
+}: {
+  vendors: string[];
+  vendor: string;
+  tier: string;
+  gpuCount: string;
+  selectedCount: number;
+  disabled: boolean;
+  onVendor: (value: string) => void;
+  onTier: (value: string) => void;
+  onGpuCount: (value: string) => void;
+  onRun: () => void;
+}) {
+  return (
+    <div className="compareControls">
+      <Field label="Provider">
+        <SearchableSelect
+          options={[{ value: 'all', label: '全部厂商' }, ...vendors.map((nextVendor) => ({ value: nextVendor, label: nextVendor }))]}
+          value={vendor}
+          onValueChange={onVendor}
+        />
+      </Field>
+      <Field label="Tier">
+        <SearchableSelect
+          options={[
+            { value: 'all', label: gpuTierLabel('all') },
+            { value: 'datacenter', label: gpuTierLabel('datacenter') },
+            { value: 'prosumer', label: gpuTierLabel('prosumer') },
+            { value: 'consumer', label: gpuTierLabel('consumer') },
+          ]}
+          value={tier}
+          onValueChange={onTier}
+        />
+      </Field>
+      <Field label="GPUs per node">
+        <SearchableSelect
+          options={gpuCountOptions.map((count) => ({ value: count, label: count ? `${count}× GPU` : '自动推荐' }))}
+          value={gpuCount}
+          onValueChange={onGpuCount}
+        />
+      </Field>
+      <button className="secondaryButton" type="button" onClick={onRun} disabled={disabled || selectedCount === 0}>
+        对比 {selectedCount} 张 GPU
+      </button>
     </div>
   );
 }
@@ -985,43 +1420,19 @@ ${isMoe ? `MoE active params = ${formatNumber(activeParams)} / total ${formatNum
   );
 }
 
-function EvidenceList({ report }: { report: Report | null }) {
-  const items = [
-    {
-      label: '权重字节',
-      value: report?.weights?.safetensors_total_bytes?.source,
-    },
-    {
-      label: '参数估算',
-      value: report?.weights?.params_estimated?.source,
-    },
-    {
-      label: 'KV Cache',
-      value: report?.kv_cache_by_context?.at(-1)?.bytes?.source,
-    },
-    {
-      label: '并发上限',
-      value: report?.performance?.max_concurrent?.source,
-    },
-  ].filter((item) => item.value);
-  const explainText = report?.explain_text?.trim();
-  const reviewText = report?.llm_review_text?.trim();
-
-  if (!items.length && !explainText && !reviewText) {
-    return <p className="emptyText">等待评估结果</p>;
-  }
-
+function InferenceSimulation({ prefillMs, clusterTps, modelId }: { prefillMs?: number; clusterTps?: number; modelId: string }) {
   return (
-    <div className="evidenceList">
-      {items.map((item) => (
-        <div className="evidenceItem" key={item.label}>
-          <span>{item.label}</span>
-          <p>{item.value}</p>
-        </div>
-      ))}
-      {explainText ? <pre className="longTextBlock">{explainText}</pre> : null}
-      {reviewText ? <pre className="longTextBlock">{reviewText}</pre> : null}
-    </div>
+    <section className="innerPanel simulationPanel">
+      <div className="simulationHeader">
+        <SectionTitle title="Inference Simulation" />
+        <span>{modelId}</span>
+      </div>
+      <div className="simulationGrid">
+        <MetricCard icon={<Clock size={17} />} label="TTFT (est.)" value={formatMs(prefillMs)} />
+        <MetricCard icon={<Zap size={17} />} label="Tok/s (est.)" value={formatFloat(clusterTps, 1)} />
+        <MetricCard icon={<Activity size={17} />} label="Generated" value="-" sub="Press Play to simulate inference" />
+      </div>
+    </section>
   );
 }
 
@@ -1051,4 +1462,30 @@ function OptimizationList({ report }: { report: Report | null }) {
       ))}
     </div>
   );
+}
+
+function requiredBytes(option?: FleetOption): number {
+  if (!option) return 0;
+  const concurrent = option.tier_concurrent_requests ?? 1;
+  const kv = (option.kv_bytes_per_request_per_gpu ?? option.kv_bytes_per_request ?? 0) * concurrent;
+  return (option.weight_bytes_per_gpu ?? 0) + kv + (option.activation_bytes_per_request_per_gpu ?? 0);
+}
+
+function numericValue(value: string): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && value.trim() ? parsed : undefined;
+}
+
+function formatCompact(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1000) return `${value / 1000 >= 10 ? (value / 1000).toFixed(0) : (value / 1000).toFixed(1)}K`;
+  return String(Math.round(value));
+}
+
+function parseCompact(value: string): number | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  const multiplier = normalized.endsWith('m') ? 1_000_000 : normalized.endsWith('k') ? 1_000 : 1;
+  const parsed = Number(normalized.replace(/[km]/g, ''));
+  return Number.isFinite(parsed) ? parsed * multiplier : undefined;
 }

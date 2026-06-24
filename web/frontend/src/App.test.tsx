@@ -26,9 +26,13 @@ describe('App shell', () => {
   it('renders reference-inspired calculator sections', () => {
     const html = renderToStaticMarkup(<App />);
 
+    expect(html).toContain('LLM VRAM Calculator');
+    expect(html).toContain('GPU Memory &amp; Performance Estimator');
+    expect(html).toContain('Configuration');
+    expect(html).toContain('Estimates');
     expect(html).toContain('VRAM Breakdown');
     expect(html).toContain('Formula Reference');
     expect(html).toContain('Inference Optimizations');
-    expect(html).toContain('GPU 对比');
+    expect(html).toContain('Compare GPUs');
   });
 });
