@@ -7,6 +7,11 @@ HELM_CHART ?= charts/llm-infer-cal
 HELM_RELEASE ?= llm-infer-cal
 HELM_NAMESPACE ?= llm-infer-cal
 HELM_PACKAGE_DIR ?= dist
+INGRESS_ENABLED ?= false
+INGRESS_CLASS_NAME ?=
+INGRESS_HOST ?= llm-infer-cal.local
+INGRESS_PATH ?= /
+INGRESS_PATH_TYPE ?= Prefix
 
 DOCKER ?= docker
 HELM ?= helm
@@ -63,7 +68,12 @@ helm-template:
 	$(HELM) template $(HELM_RELEASE) $(HELM_CHART) \
 		--namespace $(HELM_NAMESPACE) \
 		--set-string image.repository=$(IMAGE_REPOSITORY) \
-		--set-string image.tag=$(IMAGE_TAG)
+		--set-string image.tag=$(IMAGE_TAG) \
+		--set ingress.enabled=$(INGRESS_ENABLED) \
+		--set-string ingress.className=$(INGRESS_CLASS_NAME) \
+		--set-string ingress.hosts[0].host=$(INGRESS_HOST) \
+		--set-string ingress.hosts[0].paths[0].path=$(INGRESS_PATH) \
+		--set-string ingress.hosts[0].paths[0].pathType=$(INGRESS_PATH_TYPE)
 
 .PHONY: helm-package
 helm-package:
@@ -76,7 +86,12 @@ helm-install:
 		--namespace $(HELM_NAMESPACE) \
 		--create-namespace \
 		--set-string image.repository=$(IMAGE_REPOSITORY) \
-		--set-string image.tag=$(IMAGE_TAG)
+		--set-string image.tag=$(IMAGE_TAG) \
+		--set ingress.enabled=$(INGRESS_ENABLED) \
+		--set-string ingress.className=$(INGRESS_CLASS_NAME) \
+		--set-string ingress.hosts[0].host=$(INGRESS_HOST) \
+		--set-string ingress.hosts[0].paths[0].path=$(INGRESS_PATH) \
+		--set-string ingress.hosts[0].paths[0].pathType=$(INGRESS_PATH_TYPE)
 
 .PHONY: helm-uninstall
 helm-uninstall:

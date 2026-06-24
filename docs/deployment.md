@@ -48,8 +48,14 @@ make helm-install \
   HELM_RELEASE=llm-infer-cal \
   HELM_NAMESPACE=llm-infer-cal \
   IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal \
-  IMAGE_TAG=0.1.0
+  IMAGE_TAG=0.1.0 \
+  INGRESS_ENABLED=true \
+  INGRESS_HOST=llm-infer-cal.example.com \
+  INGRESS_PATH=/ \
+  INGRESS_PATH_TYPE=Prefix
 ```
+
+Set `INGRESS_HOST` and `INGRESS_PATH` to the host and path used by your cluster Ingress.
 
 Port-forward when Ingress is disabled:
 
@@ -68,5 +74,7 @@ helm upgrade --install llm-infer-cal charts/llm-infer-cal \
   --set-string image.repository=172.28.0.32:3443/xrwang/llm-infer-cal \
   --set-string image.tag=0.1.0 \
   --set ingress.enabled=true \
-  --set ingress.hosts[0].host=llm-infer-cal.example.com
+  --set-string ingress.hosts[0].host=llm-infer-cal.example.com \
+  --set-string ingress.hosts[0].paths[0].path=/ \
+  --set-string ingress.hosts[0].paths[0].pathType=Prefix
 ```
