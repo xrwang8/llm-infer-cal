@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use llm_infer_cal_core::architecture::formulas::activation::compute_activation_bytes;
 use llm_infer_cal_core::architecture::formulas::kv_cache::{
     compute_kv_cache_bits, compute_kv_cache_bytes,
 };
@@ -225,6 +226,44 @@ fn unknown_and_state_space_kv_return_unknown() {
     let state_space_kv = compute_kv_cache_bytes(&state_space, 8192, 2);
     assert_eq!(state_space_kv.value, 0);
     assert_eq!(state_space_kv.label, Label::Unknown);
+}
+
+#[test]
+fn activation_formula_uses_batched_tokens_working_set() {
+    let profile = base_profile(Some(gqa_attention()));
+
+    let activation = compute_activation_bytes(&profile, 2048);
+
+    assert_eq!(activation.value, 2048 * 8192 * 2 * 2);
+    assert_eq!(activation.label, Label::Estimated);
+    assert!(activation
+        .source
+        .as_deref()
+        .unwrap_or("")
+        .contains("batched_tokens"));
+}
+
+#[test]
+fn moe_activation_counts_router_and_dispatch_overhead() {
+    let mut profile = base_profile(None);
+    profile.hidden_size = 4096;
+    profile.moe = Some(MoeTraits {
+        num_routed_experts: 256,
+        num_shared_experts: 1,
+        num_experts_per_tok: 8,
+        moe_intermediate_size: 2048,
+    });
+
+    let dense_baseline = 2048_u64 * 4096 * 2 * 2;
+    let activation = compute_activation_bytes(&profile, 2048);
+
+    let expected = (dense_baseline as f64 * (1.0 + (8.0 / 256.0) * 0.5)) as u64;
+    assert_eq!(activation.value, expected);
+    assert!(activation
+        .source
+        .as_deref()
+        .unwrap_or("")
+        .contains("MoE(8/256"));
 }
 
 #[test]

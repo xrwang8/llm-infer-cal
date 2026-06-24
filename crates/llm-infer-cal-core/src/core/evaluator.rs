@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::architecture::detector::detect;
-use crate::architecture::formulas::activation::compute_activation_bytes;
+use crate::architecture::formulas::activation::{compute_activation_bytes, DEFAULT_BATCHED_TOKENS};
 use crate::architecture::formulas::kv_cache::compute_kv_cache_bits;
 use crate::architecture::formulas::weight::{estimate_active_params, estimate_total_params};
 use crate::architecture::profile::ArchitectureProfile;
@@ -180,9 +180,10 @@ impl Evaluator {
                 (ctx, kv)
             })
             .collect::<BTreeMap<_, _>>();
+        let activation_working_set = compute_activation_bytes(&profile, DEFAULT_BATCHED_TOKENS);
         let activation_by_context = contexts_to_report
             .into_iter()
-            .map(|ctx| (ctx, compute_activation_bytes(&profile, ctx)))
+            .map(|ctx| (ctx, activation_working_set.clone()))
             .collect::<BTreeMap<_, _>>();
 
         let engine_match = find_match(engine, &profile.model_type, None, None);
@@ -219,10 +220,7 @@ impl Evaluator {
                     .iter()
                     .filter_map(|(ctx, value)| (value.value > 0).then_some((*ctx, value.value)))
                     .collect::<Vec<_>>();
-                let activation_ref_bytes = activation_by_context
-                    .get(&reference_ctx)
-                    .map(|value| value.value)
-                    .unwrap_or(0);
+                let activation_ref_bytes = activation_working_set.value;
                 let recommendation = plan_with_memory_options(
                     &profile,
                     weight.total_bytes.value,
@@ -301,10 +299,10 @@ impl Evaluator {
                     let _ = kv_ref_ctx;
                     let headroom_per_gpu = chosen_option
                         .usable_bytes_per_gpu
-                        .saturating_sub(chosen_option.weight_bytes_per_gpu);
+                        .saturating_sub(chosen_option.weight_bytes_per_gpu)
+                        .saturating_sub(chosen_option.activation_bytes_per_request_per_gpu);
                     let shards = effective_kv_shards(&profile, chosen).max(1);
-                    let kv_ref_per_gpu = kv_ref_bytes.div_ceil(shards).max(1)
-                        + chosen_option.activation_bytes_per_request_per_gpu;
+                    let kv_ref_per_gpu = kv_ref_bytes.div_ceil(shards).max(1);
                     concurrency = Some(analyze_concurrency(
                         headroom_per_gpu,
                         kv_ref_per_gpu,

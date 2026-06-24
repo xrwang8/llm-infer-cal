@@ -19,6 +19,26 @@ These are **derived from public data**, no empirical factors:
 **Why trustworthy**: direct read from the source file metadata. No estimation
 step. The file sizes are the bytes you download with the model weights.
 
+### Activation working set
+**Formula**:
+```
+activation_bytes = max_num_batched_tokens × hidden_size × dtype_bytes × activation_factor
+```
+
+Default `max_num_batched_tokens` is `2048`, `dtype_bytes` is `2`, and
+`activation_factor` is `2`.
+
+**Planner use**: activation is charged **once per engine/GPU layout**, after
+TP sharding by hidden dimension. It is not multiplied by request concurrency.
+Long prompts are chunked by serving engines; the long-lived per-request state is
+KV cache, not activation tensors.
+
+**Source**: vLLM profiles peak activation memory during startup and subtracts
+non-KV memory from the executor memory budget before allocating KV cache. vLLM
+chunked prefill uses `max_num_batched_tokens` as the per-step token budget.
+SGLang exposes the same tuning shape via `--chunked-prefill-size` /
+`--max-prefill-tokens`.
+
 ### KV cache per request
 **Formula (standard attention)**:
 ```
@@ -67,6 +87,26 @@ divide the layer stack.
 **Why this matters**: single-node-only planning can report an impossible
 8-GPU fit for very large models. TP/PP planning makes the failure visible and
 then searches larger valid layouts such as `TP8 × PP6`.
+
+### Fleet memory budget
+**Formula**:
+```
+reserved_per_gpu = max(3GB, 10% × HBM)
+usable_per_gpu = HBM - reserved_per_gpu
+needed_per_gpu = resident_weight_per_gpu
+               + activation_working_set_per_gpu
+               + concurrent_requests × per_gpu_KV
+```
+
+The 10% reserve matches `--gpu-memory-utilization 0.9` / SGLang
+`--mem-fraction-static 0.9` style serving defaults; the 3GB floor avoids
+under-reserving CUDA/runtime/framework memory on smaller GPUs.
+
+**MoE resident weights**: all expert weights remain resident. For MoE models,
+the planner estimates the routed-expert fraction from config and shards routed
+experts by `min(tp_size, num_routed_experts)`, while static/shared parts shard
+by TP. PP divides the layer stack. This prevents over-sharding routed experts
+when expert count is smaller than TP.
 
 ---
 
@@ -149,6 +189,10 @@ the kind of data the tool's "honest label" philosophy wants.
 K = floor(per_GPU_headroom_bytes / per_GPU_KV_bytes_per_request)
 ```
 Same logic as the fleet planner. Deterministic given K inputs.
+
+Here `per_GPU_headroom_bytes = usable_per_gpu - resident_weight_per_gpu -
+activation_working_set_per_gpu`; activation is charged once, while KV scales
+with concurrent requests.
 
 **Label**: `[estimated]` — the "headroom" calculation assumes `--gpu-memory-utilization 0.9`
 matches what vLLM actually achieves. Usually within 2-3% of reality.

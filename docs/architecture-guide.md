@@ -80,6 +80,24 @@ per_gpu_KV = total_KV / effective_kv_shards
 This is why a model can fail on 8 H100s but receive a larger multi-node
 recommendation such as `TP8 x PP6`.
 
+## Fleet Memory Budget
+
+The planner treats weights and activation as fixed resident terms, and KV cache
+as the term that scales with concurrency:
+
+```text
+reserved_per_gpu = max(3GB, 10% x HBM)
+usable_per_gpu = HBM - reserved_per_gpu
+needed_per_gpu = resident_weight_per_gpu
+               + activation_working_set_per_gpu
+               + concurrent_requests x per_gpu_KV
+```
+
+Activation is sized from the serving engine's batched-token profiling budget
+(`2048` by default), not from full context length. For MoE models, routed expert
+weights shard up to `min(tp_size, num_routed_experts)`, while static/shared
+weights shard by TP; PP divides the layer stack.
+
 ## Adding Support
 
 1. Add or update Rust tests under `crates/llm-infer-cal-core/tests/`.

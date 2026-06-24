@@ -535,9 +535,9 @@ export function App() {
                     <small>{labelText(row.bytes?.label)}</small>
                   </div>
                 ))}
-                {activationRows.map((row) => (
+                {activationRows.slice(0, 1).map((row) => (
                   <div className="kvRow" key={`activation-${row.context_tokens}`}>
-                    <span>{formatNumber(row.context_tokens)} ctx activation</span>
+                    <span>activation working set</span>
                     <strong>{formatBytes(row.bytes?.value)}</strong>
                     <small>{labelText(row.bytes?.label)}</small>
                   </div>
@@ -809,7 +809,7 @@ function MemoryBreakdown({ option, hardware }: { option?: FleetOption; hardware?
   const speculativeWeight = option?.speculative_weight_bytes_per_gpu ?? 0;
   const cpuOffload = option?.cpu_offload_bytes_per_gpu ?? 0;
   const kv = (option?.kv_bytes_per_request_per_gpu ?? option?.kv_bytes_per_request ?? 0) * concurrent;
-  const activation = (option?.activation_bytes_per_request_per_gpu ?? 0) * concurrent;
+  const activation = option?.activation_bytes_per_request_per_gpu ?? 0;
   const reserved = option?.reserved_bytes_per_gpu ?? Math.max(memoryBytes - (option?.usable_bytes_per_gpu ?? 0), 0);
   const required = option?.required_bytes_per_gpu_at_tier ?? weight + kv + activation;
 
@@ -823,7 +823,7 @@ function MemoryBreakdown({ option, hardware }: { option?: FleetOption; hardware?
       {speculativeWeight > 0 ? <Bar label="Draft / Speculative Weights" value={speculativeWeight} total={memoryBytes} tone="speculative" /> : null}
       {cpuOffload > 0 ? <Bar label="CPU Offload Saved / GPU" value={cpuOffload} total={memoryBytes} tone="offload" /> : null}
       <Bar label={`KV Cache × ${concurrent}`} value={kv} total={memoryBytes} tone="kv" />
-      <Bar label={`Activations × ${concurrent}`} value={activation} total={memoryBytes} tone="activation" />
+      <Bar label="Activation Working Set" value={activation} total={memoryBytes} tone="activation" />
       <Bar label="Reserved / Framework" value={reserved} total={memoryBytes} tone="reserved" />
     </div>
   );
@@ -967,9 +967,9 @@ ${kv?.bytes?.value ? `selected = ${formatBytes(kv.bytes.value)}` : 'selected = w
       <details>
         <summary>Activations</summary>
         <pre>
-{`activation ~= seq_len * hidden_size * 2B
-${isMoe ? 'MoE routing factor is included.' : 'Dense activation estimate.'}
-${targetConcurrency ? `target concurrency = ${formatNumber(targetConcurrency)} requests` : 'target concurrency = default tier'}
+{`activation ~= max_num_batched_tokens * hidden_size * 2B * activation_factor
+${isMoe ? 'MoE router/dispatch correction is included.' : 'Dense activation working-set estimate.'}
+${targetConcurrency ? `target concurrency = ${formatNumber(targetConcurrency)} requests; activation is charged once` : 'activation is charged once; KV cache scales with tier concurrency'}
 ${activation?.bytes?.value ? `selected = ${formatBytes(activation.bytes.value)}` : 'selected = waiting for report'}`}
         </pre>
       </details>

@@ -263,7 +263,8 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
     for opt in &fleet.options {
         let headroom = opt
             .usable_bytes_per_gpu
-            .saturating_sub(opt.weight_bytes_per_gpu);
+            .saturating_sub(opt.weight_bytes_per_gpu)
+            .saturating_sub(opt.activation_bytes_per_request_per_gpu);
         let fit_criterion = match opt.tier {
             "min" => 1,
             "dev" => 8,
@@ -283,15 +284,23 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
         let reference_ctx = fmt_context(opt.kv_reference_context_tokens);
         let mut steps = vec![
             format!(
-                "per-GPU HBM usable (@ 90% util) = {} bytes",
-                fmt_u64(opt.usable_bytes_per_gpu)
+                "per-GPU HBM usable (HBM - reserve) = {} bytes; reserve = {} bytes",
+                fmt_u64(opt.usable_bytes_per_gpu),
+                fmt_u64(opt.reserved_bytes_per_gpu)
             ),
             format!("parallel layout = {layout}"),
             format!(
-                "weight per GPU = total_weight / total_gpus = {} / {} = {} bytes",
-                fmt_u64(report.weight.total_bytes.value),
-                opt.gpu_count,
+                "resident weight per GPU = {} bytes",
                 fmt_u64(opt.weight_bytes_per_gpu)
+            ),
+            format!(
+                "activation working set per GPU = {} bytes",
+                fmt_u64(opt.activation_bytes_per_request_per_gpu)
+            ),
+            format!(
+                "total model weight bytes = {} (observed safetensors), allocated over {} GPUs",
+                fmt_u64(report.weight.total_bytes.value),
+                opt.gpu_count
             ),
             format!(
                 "per-GPU KV @ {reference_ctx} = total_KV / effective_kv_shards = {} / {} = {} bytes",
@@ -300,7 +309,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
                 fmt_u64(kv_per_gpu)
             ),
             format!(
-                "headroom per GPU = usable - weight = {} bytes ({:.2} GB)",
+                "KV headroom per GPU = usable - resident_weight - activation = {} bytes ({:.2} GB)",
                 fmt_u64(headroom),
                 headroom as f64 / 1e9
             ),
@@ -321,7 +330,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
 
         let mut entry = ExplainEntry::new(
             &format!("Fleet tier: {} ({} GPUs)", opt.tier, opt.gpu_count),
-            "smallest TP/PP candidate where weight_per_gpu + concurrent x per_gpu_kv_per_request <= usable_per_gpu",
+            "smallest TP/PP candidate where resident_weight_per_gpu + activation_working_set_per_gpu + concurrent x per_gpu_kv_per_request <= usable_per_gpu",
         );
         entry.inputs = vec![
             ExplainInput::new(
@@ -345,7 +354,7 @@ fn fleet_tiers(report: &EvaluationReport, entries: &mut Vec<ExplainEntry>) {
         entry.steps = steps;
         entry.result = format!("{} GPUs, fit={}", opt.gpu_count, opt.fits);
         entry.source =
-            "vLLM --gpu-memory-utilization 0.9 convention; TP divisibility and PP layer divisibility follow vLLM/SGLang launch constraints"
+            "vLLM GPU memory profiling reserves weights, peak activation, and KV cache inside gpu_memory_utilization; SGLang memory pool similarly budgets static weights plus KV cache"
                 .to_string();
         entry.methodology_anchor = "#tppp-aware-kv-sharding".to_string();
         entries.push(entry);

@@ -374,6 +374,36 @@ fn evaluate_adds_sglang_draft_model_path_to_generated_command() {
 }
 
 #[test]
+fn evaluate_reuses_one_activation_working_set_across_contexts() {
+    let report = evaluator()
+        .evaluate(
+            "test/llama-mini",
+            "H800",
+            "vllm",
+            EvaluationOptions::default(),
+        )
+        .unwrap();
+
+    let activation_values = report
+        .activation_by_context
+        .values()
+        .map(|value| value.value)
+        .collect::<Vec<_>>();
+
+    assert!(activation_values.len() > 1);
+    assert!(activation_values.windows(2).all(|pair| pair[0] == pair[1]));
+    assert!(report
+        .activation_by_context
+        .values()
+        .next()
+        .unwrap()
+        .source
+        .as_deref()
+        .unwrap_or("")
+        .contains("batched_tokens"));
+}
+
+#[test]
 fn evaluate_uses_moe_active_params_for_prefill_and_decode() {
     let report = moe_evaluator()
         .evaluate(

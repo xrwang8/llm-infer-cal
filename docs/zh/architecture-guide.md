@@ -66,6 +66,23 @@ per_gpu_KV = total_KV / effective_kv_shards
 
 这就是为什么一个模型可能 8 张 H100 放不下，但会得到更大的多机建议，例如 `TP8 x PP6`。
 
+## Fleet 显存预算
+
+Planner 把权重和 activation 当作固定常驻项，把 KV cache 当作随并发增长的项：
+
+```text
+reserved_per_gpu = max(3GB, 10% x HBM)
+usable_per_gpu = HBM - reserved_per_gpu
+needed_per_gpu = resident_weight_per_gpu
+               + activation_working_set_per_gpu
+               + concurrent_requests x per_gpu_KV
+```
+
+Activation 按 serving engine 的 batched-token profiling 预算计算（默认 `2048`），
+不是按完整上下文长度计算。对 MoE 模型，routed expert 权重最多按
+`min(tp_size, num_routed_experts)` 切分，static/shared 权重按 TP 切分，PP 则切分
+layer stack。
+
 ## 新增支持
 
 1. 先在 `crates/llm-infer-cal-core/tests/` 增加或更新 Rust 测试。

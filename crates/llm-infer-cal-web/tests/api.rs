@@ -90,7 +90,7 @@ async fn evaluate_endpoint_returns_report_json() {
     assert_eq!(body["model"]["id"], "Qwen/Qwen3-30B-A3B");
     let lines = body["generated_command"]["lines"].as_array().unwrap();
     assert!(lines.iter().any(|line| line == "--max-model-len 40960"));
-    assert!(lines.iter().any(|line| line == "--max-num-seqs 19"));
+    assert!(lines.iter().any(|line| line == "--max-num-seqs 20"));
 }
 
 #[tokio::test]

@@ -27,6 +27,22 @@ fn gpu(nvlink: u64) -> GPUSpec {
     }
 }
 
+fn small_gpu() -> GPUSpec {
+    GPUSpec {
+        id: "small-16gb".to_string(),
+        aliases: Vec::new(),
+        memory_gb: 16,
+        nvlink_bandwidth_gbps: 0,
+        memory_bandwidth_gbps: Some(300),
+        fp16_tflops: 65.0,
+        fp8_support: false,
+        fp4_support: false,
+        notes_en: None,
+        notes_zh: None,
+        spec_source: Some("test".to_string()),
+    }
+}
+
 fn deepseek_v4_profile() -> ArchitectureProfile {
     ArchitectureProfile {
         model_type: "deepseek_v4".to_string(),
@@ -106,6 +122,36 @@ fn glm52_profile() -> ArchitectureProfile {
             num_routed_experts: 256,
             num_shared_experts: 1,
             num_experts_per_tok: 8,
+            moe_intermediate_size: 2048,
+        }),
+        ..ArchitectureProfile::default()
+    }
+}
+
+fn tiny_moe_few_experts_profile() -> ArchitectureProfile {
+    ArchitectureProfile {
+        model_type: "tiny_moe".to_string(),
+        architectures: vec!["tinymoeforcausallm".to_string()],
+        family: Family::Transformer,
+        num_hidden_layers: 8,
+        hidden_size: 4096,
+        vocab_size: 4096,
+        confidence: Confidence::High,
+        attention: Some(AttentionTraits {
+            variant: AttentionVariant::Gqa,
+            num_heads: 8,
+            num_kv_heads: 8,
+            head_dim: 512,
+            q_lora_rank: None,
+            kv_lora_rank: None,
+            qk_rope_head_dim: None,
+            compress_ratios: None,
+            nsa_topk: None,
+        }),
+        moe: Some(MoeTraits {
+            num_routed_experts: 4,
+            num_shared_experts: 1,
+            num_experts_per_tok: 2,
             moe_intermediate_size: 2048,
         }),
         ..ArchitectureProfile::default()
@@ -269,15 +315,57 @@ fn fleet_planner_counts_activation_memory_in_required_bytes() {
     let activated = &with_activation.options[0];
 
     assert_eq!(plain.max_concurrent_at_reference_ctx, 6);
-    assert_eq!(activated.max_concurrent_at_reference_ctx, 4);
+    assert_eq!(activated.max_concurrent_at_reference_ctx, 5);
     assert_eq!(activated.tier_concurrent_requests, 8);
     assert_eq!(activated.kv_bytes_per_request_per_gpu, 10_000_000_000);
     assert_eq!(activated.activation_bytes_per_request, 5_000_000_000);
     assert_eq!(
         activated.required_bytes_per_gpu_at_tier,
-        10_000_000_000 + 8 * (10_000_000_000 + 5_000_000_000)
+        10_000_000_000 + 5_000_000_000 + 8 * 10_000_000_000
     );
     assert!(activated.required_bytes_per_gpu_at_tier > plain.required_bytes_per_gpu_at_tier);
+}
+
+#[test]
+fn fleet_planner_reserves_at_least_three_gb_for_small_gpus() {
+    let rec = plan(
+        &llama_profile(),
+        1_000_000_000,
+        1_000_000_000,
+        131_072,
+        &small_gpu(),
+        Some(1),
+        &[(131_072, 1_000_000_000)],
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.reserved_bytes_per_gpu, 3_000_000_000);
+    assert_eq!(option.usable_bytes_per_gpu, 13_000_000_000);
+}
+
+#[test]
+fn fleet_planner_does_not_over_shard_moe_experts_beyond_expert_count() {
+    let h100 = lookup("H100").unwrap();
+    let rec = plan_with_activation(
+        &tiny_moe_few_experts_profile(),
+        80_000_000_000,
+        1_000_000_000,
+        0,
+        131_072,
+        &h100,
+        Some(8),
+        &[(131_072, 1_000_000_000)],
+        &[(131_072, 0)],
+    );
+
+    let option = &rec.options[0];
+    assert_eq!(option.tensor_parallel_size, 8);
+    assert_eq!(option.pipeline_parallel_size, 1);
+    assert!(
+        option.main_weight_bytes_per_gpu > 10_000_000_000,
+        "routed experts can only shard across 4 experts, so TP8 must hold more than naive weight/8"
+    );
+    assert!(option.main_weight_bytes_per_gpu < 20_000_000_000);
 }
 
 #[test]
@@ -309,7 +397,7 @@ fn fleet_planner_applies_target_concurrency_speculative_weights_and_cpu_offload(
     assert_eq!(option.weight_bytes_per_gpu, 48_000_000_000);
     assert_eq!(
         option.required_bytes_per_gpu_at_tier,
-        48_000_000_000 + 3 * (5_000_000_000 + 1_000_000_000)
+        48_000_000_000 + 1_000_000_000 + 3 * 5_000_000_000
     );
     assert_eq!(option.max_concurrent_at_reference_ctx, 4);
     assert!(option.fits);

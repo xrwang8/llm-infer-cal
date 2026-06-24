@@ -558,7 +558,8 @@ fn render_fleet(report: &EvaluationReport, out: &mut Vec<String>) {
     for opt in &fleet.options {
         let headroom = opt
             .usable_bytes_per_gpu
-            .saturating_sub(opt.weight_bytes_per_gpu);
+            .saturating_sub(opt.weight_bytes_per_gpu)
+            .saturating_sub(opt.activation_bytes_per_request_per_gpu);
         let marker = if fleet.best_tier == Some(opt.tier) {
             " *"
         } else {

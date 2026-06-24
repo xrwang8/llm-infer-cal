@@ -15,6 +15,23 @@
 
 **为什么可信**：直接读取数据源返回的文件元数据。无估算步骤。这个字节数就是下载模型权重时得到的字节数。
 
+### Activation 工作集
+**公式**：
+```
+activation_bytes = max_num_batched_tokens × hidden_size × dtype_bytes × activation_factor
+```
+
+默认 `max_num_batched_tokens` 为 `2048`，`dtype_bytes` 为 `2`，
+`activation_factor` 为 `2`。
+
+**Planner 用法**：activation 按**每个 engine/GPU layout 一次性**计入，并按
+TP 的 hidden 维度切分。它不会乘以请求并发。长 prompt 会被 serving engine
+分块处理；真正随请求数和上下文长度常驻增长的是 KV cache，不是 activation tensor。
+
+**来源**：vLLM 启动时会 profile peak activation memory，并在给 KV cache 分配前扣除
+non-KV memory。vLLM chunked prefill 使用 `max_num_batched_tokens` 作为每步 token
+预算。SGLang 也通过 `--chunked-prefill-size` / `--max-prefill-tokens` 暴露同类调参。
+
 ### 单请求 KV Cache
 **公式（标准 attention）**：
 ```
@@ -51,6 +68,25 @@ per_gpu_KV = total_KV / effective_kv_shards
 **来源**：vLLM 的 TP KV 分摊实现，以及 vLLM / SGLang 多机 TP/PP 启动约定。MQA（kv_heads=1）时 KV 在 TP 维度复制；GQA（kv_heads=G）最多切 G 份；MLA 在 planner 里不按 TP 切 latent KV，但 PP stage 会分摊层数。
 
 **为什么重要**：只看单节点会把超大模型误报成 8 卡可运行。TP/PP 规划会先暴露 8 卡放不下，再搜索 `TP8 × PP6` 这类有效多机布局。
+
+### Fleet 显存预算
+**公式**：
+```
+reserved_per_gpu = max(3GB, 10% × HBM)
+usable_per_gpu = HBM - reserved_per_gpu
+needed_per_gpu = resident_weight_per_gpu
+               + activation_working_set_per_gpu
+               + concurrent_requests × per_gpu_KV
+```
+
+10% reserve 对齐 `--gpu-memory-utilization 0.9` / SGLang
+`--mem-fraction-static 0.9` 这类 serving 默认口径；3GB floor 避免小卡低估
+CUDA/runtime/framework 预留。
+
+**MoE 常驻权重**：所有 expert 权重都会 resident。对 MoE 模型，planner 从 config
+估算 routed expert 占比，并按 `min(tp_size, num_routed_experts)` 切 routed experts；
+static/shared 部分按 TP 切分，PP 则切分 layer stack。这样可以避免在 expert 数小于
+TP 时把 routed experts 过度切分。
 
 ---
 
@@ -117,6 +153,9 @@ llm-infer-cal <model> --gpu H800 \
 K = floor(单卡余量字节 / 单请求 KV 字节)
 ```
 和 fleet planner 同一逻辑。给定 K 的输入，结果确定。
+
+这里 `单卡余量字节 = usable_per_gpu - resident_weight_per_gpu -
+activation_working_set_per_gpu`；activation 只计一次，KV 才随并发请求数增长。
 
 **标签**：`[估算]`——"余量"的计算假设 `--gpu-memory-utilization 0.9` 和 vLLM 实际表现一致。通常误差 2-3%。
 

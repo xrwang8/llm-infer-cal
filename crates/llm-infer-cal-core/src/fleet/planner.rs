@@ -1,7 +1,9 @@
+use crate::architecture::formulas::weight::estimate_total_params;
 use crate::architecture::profile::{ArchitectureProfile, AttentionVariant};
 use crate::hardware::loader::GPUSpec;
 
 const OVERHEAD_FRACTION: f64 = 0.10;
+const OVERHEAD_FLOOR_BYTES: u64 = 3_000_000_000;
 const MAX_TP_SINGLE_NODE: u64 = 8;
 const MAX_PIPELINE_PARALLEL: u64 = 8;
 
@@ -68,7 +70,6 @@ struct EvalContext<'a> {
     valid_tp: &'a [u64],
     candidates: &'a [u64],
     kv_by_context: &'a [(u64, u64)],
-    activation_by_context: &'a [(u64, u64)],
     memory_options: FleetMemoryOptions,
 }
 
@@ -128,12 +129,13 @@ pub fn plan_with_memory_options(
     gpu: &GPUSpec,
     forced_gpu_count: Option<u64>,
     kv_bytes_by_context: &[(u64, u64)],
-    activation_bytes_by_context: &[(u64, u64)],
+    _activation_bytes_by_context: &[(u64, u64)],
     memory_options: FleetMemoryOptions,
 ) -> FleetRecommendation {
     let total_memory_per_gpu = (gpu.memory_gb as f64 * 1_000_000_000.0) as u64;
-    let usable_per_gpu =
-        (gpu.memory_gb as f64 * 1_000_000_000.0 * (1.0 - OVERHEAD_FRACTION)) as u64;
+    let reserved_per_gpu =
+        ((total_memory_per_gpu as f64 * OVERHEAD_FRACTION) as u64).max(OVERHEAD_FLOOR_BYTES);
+    let usable_per_gpu = total_memory_per_gpu.saturating_sub(reserved_per_gpu);
     let valid_tp = valid_tp_sizes(profile);
     let candidates = candidate_gpu_counts(profile, &valid_tp);
     let constraint_en = constraint_note_en(profile, &valid_tp);
@@ -149,7 +151,6 @@ pub fn plan_with_memory_options(
         valid_tp: &valid_tp,
         candidates: &candidates,
         kv_by_context: kv_bytes_by_context,
-        activation_by_context: activation_bytes_by_context,
         memory_options,
     };
 
@@ -311,39 +312,46 @@ fn fits(
     concurrent: u64,
     memory_options: FleetMemoryOptions,
 ) -> bool {
-    let weight_per_gpu = resident_weight_per_gpu(weight_bytes, gpu_count, memory_options).total;
+    let weight_per_gpu =
+        resident_weight_per_gpu(profile, weight_bytes, gpu_count, memory_options).total;
     let shards = effective_kv_shards(profile, gpu_count);
     let kv_per_gpu = ceil_div(kv_bytes, shards);
-    let activation_per_gpu = ceil_div(activation_bytes, gpu_count.max(1));
-    let needed = weight_per_gpu + concurrent * (kv_per_gpu + activation_per_gpu);
+    let activation_per_gpu = ceil_div(activation_bytes, activation_shards(profile, gpu_count));
+    let needed = weight_per_gpu + activation_per_gpu + concurrent * kv_per_gpu;
     needed <= usable_per_gpu
 }
 
 fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) -> FleetOption {
     let (tensor_parallel_size, pipeline_parallel_size, node_count) =
         layout_for_count(eval.profile, gpu_count);
-    let weight = resident_weight_per_gpu(eval.weight_bytes, gpu_count, eval.memory_options);
+    let weight = resident_weight_per_gpu(
+        eval.profile,
+        eval.weight_bytes,
+        gpu_count,
+        eval.memory_options,
+    );
     let shards = effective_kv_shards(eval.profile, gpu_count);
     let kv_per_gpu = ceil_div(eval.kv_bytes, shards);
-    let activation_per_gpu = ceil_div(eval.activation_bytes, gpu_count.max(1));
-    let per_request_per_gpu = kv_per_gpu + activation_per_gpu;
-    let headroom = eval.usable_per_gpu.saturating_sub(weight.total);
-    let max_concurrent = headroom.checked_div(per_request_per_gpu).unwrap_or(0);
+    let activation_per_gpu = ceil_div(
+        eval.activation_bytes,
+        activation_shards(eval.profile, gpu_count),
+    );
+    let headroom = eval
+        .usable_per_gpu
+        .saturating_sub(weight.total)
+        .saturating_sub(activation_per_gpu);
+    let max_concurrent = if kv_per_gpu > 0 {
+        headroom.checked_div(kv_per_gpu).unwrap_or(0)
+    } else {
+        0
+    };
     let mut max_concurrent_by_context = eval
         .kv_by_context
         .iter()
         .map(|(ctx, kv)| {
             let kv_per_gpu = ceil_div(*kv, shards);
-            let activation = eval
-                .activation_by_context
-                .iter()
-                .find(|(activation_ctx, _)| activation_ctx == ctx)
-                .map(|(_, bytes)| *bytes)
-                .unwrap_or(0);
-            let activation_per_gpu = ceil_div(activation, gpu_count.max(1));
-            let per_request = kv_per_gpu + activation_per_gpu;
-            let concurrent = if per_request > 0 {
-                headroom.checked_div(per_request).unwrap_or(0)
+            let concurrent = if kv_per_gpu > 0 {
+                headroom.checked_div(kv_per_gpu).unwrap_or(0)
             } else {
                 0
             };
@@ -360,7 +368,7 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         _ => 8,
     };
     let required_bytes_per_gpu_at_tier =
-        weight.total + tier_concurrent * (kv_per_gpu + activation_per_gpu);
+        weight.total + activation_per_gpu + tier_concurrent * kv_per_gpu;
     let fits = fits(
         gpu_count,
         eval.profile,
@@ -397,11 +405,11 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
     } else if !fits {
         (
             format!(
-                "Weights + {tier_concurrent}x KV/activation would exceed {:.1} GB usable per GPU",
+                "Weights + activation + {tier_concurrent}x KV would exceed {:.1} GB usable per GPU",
                 eval.usable_per_gpu as f64 / 1e9
             ),
             format!(
-                "权重 + {tier_concurrent} 份 KV/Activation 超过单卡可用的 {:.1} GB",
+                "权重 + Activation + {tier_concurrent} 份 KV 超过单卡可用的 {:.1} GB",
                 eval.usable_per_gpu as f64 / 1e9
             ),
         )
@@ -455,11 +463,12 @@ struct ResidentWeight {
 }
 
 fn resident_weight_per_gpu(
+    profile: &ArchitectureProfile,
     weight_bytes: u64,
     gpu_count: u64,
     memory_options: FleetMemoryOptions,
 ) -> ResidentWeight {
-    let base_main = ceil_div(weight_bytes, gpu_count.max(1));
+    let base_main = resident_main_weight_per_gpu(profile, weight_bytes, gpu_count);
     let cpu_offload = memory_options.cpu_offload_bytes_per_gpu.min(base_main);
     let main = base_main.saturating_sub(cpu_offload);
     let speculative = ceil_div(memory_options.speculative_weight_bytes, gpu_count.max(1));
@@ -469,6 +478,58 @@ fn resident_weight_per_gpu(
         cpu_offload,
         total: main + speculative,
     }
+}
+
+fn resident_main_weight_per_gpu(
+    profile: &ArchitectureProfile,
+    weight_bytes: u64,
+    gpu_count: u64,
+) -> u64 {
+    if weight_bytes == 0 {
+        return 0;
+    }
+
+    let (tp, pp, _) = layout_for_count(profile, gpu_count);
+    let pp = pp.max(1);
+    let stage_weight_bytes = ceil_div(weight_bytes, pp);
+
+    let Some(moe) = &profile.moe else {
+        return ceil_div(stage_weight_bytes, tp.max(1));
+    };
+
+    let routed_fraction = moe_routed_weight_fraction(profile);
+    let routed_bytes = (stage_weight_bytes as f64 * routed_fraction) as u64;
+    let static_bytes = stage_weight_bytes.saturating_sub(routed_bytes);
+
+    let routed_shards = moe.num_routed_experts.max(1).min(tp.max(1));
+    let static_shards = tp.max(1);
+    ceil_div(routed_bytes, routed_shards) + ceil_div(static_bytes, static_shards)
+}
+
+fn moe_routed_weight_fraction(profile: &ArchitectureProfile) -> f64 {
+    let Some(moe) = &profile.moe else {
+        return 0.0;
+    };
+    if profile.hidden_size == 0
+        || profile.num_hidden_layers == 0
+        || moe.moe_intermediate_size == 0
+        || moe.num_routed_experts == 0
+    {
+        return 0.80;
+    }
+
+    let single_expert = 3_u128 * profile.hidden_size as u128 * moe.moe_intermediate_size as u128;
+    let routed = single_expert * moe.num_routed_experts as u128 * profile.num_hidden_layers as u128;
+    let total = estimate_total_params(profile).value as u128;
+    if total == 0 || routed == 0 || routed >= total {
+        return 0.80;
+    }
+    routed as f64 / total as f64
+}
+
+fn activation_shards(profile: &ArchitectureProfile, gpu_count: u64) -> u64 {
+    let (tp, _, _) = layout_for_count(profile, gpu_count);
+    tp.max(1)
 }
 
 fn fmt_context(tokens: u64) -> String {
