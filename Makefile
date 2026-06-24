@@ -1,5 +1,5 @@
 APP_NAME ?= llm-infer-cal
-IMAGE_REPOSITORY ?= llm-infer-cal
+IMAGE_REPOSITORY ?= 172.28.0.32:3443/xrwang/llm-infer-cal
 IMAGE_TAG ?= latest
 IMAGE ?= $(IMAGE_REPOSITORY):$(IMAGE_TAG)
 
@@ -62,8 +62,8 @@ helm-lint:
 helm-template:
 	$(HELM) template $(HELM_RELEASE) $(HELM_CHART) \
 		--namespace $(HELM_NAMESPACE) \
-		--set image.repository=$(IMAGE_REPOSITORY) \
-		--set image.tag=$(IMAGE_TAG)
+		--set-string image.repository=$(IMAGE_REPOSITORY) \
+		--set-string image.tag=$(IMAGE_TAG)
 
 .PHONY: helm-package
 helm-package:
@@ -75,8 +75,8 @@ helm-install:
 	$(HELM) upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
 		--namespace $(HELM_NAMESPACE) \
 		--create-namespace \
-		--set image.repository=$(IMAGE_REPOSITORY) \
-		--set image.tag=$(IMAGE_TAG)
+		--set-string image.repository=$(IMAGE_REPOSITORY) \
+		--set-string image.tag=$(IMAGE_TAG)
 
 .PHONY: helm-uninstall
 helm-uninstall:

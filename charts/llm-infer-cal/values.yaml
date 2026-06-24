@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: llm-infer-cal
+  repository: 172.28.0.32:3443/xrwang/llm-infer-cal
   pullPolicy: IfNotPresent
   tag: ""
 

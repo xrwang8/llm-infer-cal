@@ -15,13 +15,13 @@ make build
 ## Build The Container Image
 
 ```sh
-make docker-build IMAGE_REPOSITORY=llm-infer-cal IMAGE_TAG=0.1.0
+make docker-build IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal IMAGE_TAG=0.1.0
 ```
 
 Run it locally:
 
 ```sh
-make docker-run IMAGE_REPOSITORY=llm-infer-cal IMAGE_TAG=0.1.0
+make docker-run IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal IMAGE_TAG=0.1.0
 ```
 
 Then open `http://127.0.0.1:8080`.
@@ -32,7 +32,7 @@ Lint and render the chart:
 
 ```sh
 make helm-lint
-make helm-template IMAGE_REPOSITORY=llm-infer-cal IMAGE_TAG=0.1.0
+make helm-template IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal IMAGE_TAG=0.1.0
 ```
 
 Package the chart:
@@ -47,7 +47,7 @@ Install or upgrade:
 make helm-install \
   HELM_RELEASE=llm-infer-cal \
   HELM_NAMESPACE=llm-infer-cal \
-  IMAGE_REPOSITORY=llm-infer-cal \
+  IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal \
   IMAGE_TAG=0.1.0
 ```
 
@@ -65,8 +65,8 @@ Then open `http://127.0.0.1:8080`.
 helm upgrade --install llm-infer-cal charts/llm-infer-cal \
   --namespace llm-infer-cal \
   --create-namespace \
-  --set image.repository=registry.example.com/llm-infer-cal \
-  --set image.tag=0.1.0 \
+  --set-string image.repository=172.28.0.32:3443/xrwang/llm-infer-cal \
+  --set-string image.tag=0.1.0 \
   --set ingress.enabled=true \
   --set ingress.hosts[0].host=llm-infer-cal.example.com
 ```

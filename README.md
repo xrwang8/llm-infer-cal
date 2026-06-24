@@ -300,6 +300,59 @@ curl -s localhost:8080/api/evaluate \
   -d '{"model_id":"deepseek-ai/DeepSeek-V3","gpu":"H800","source":"builtin"}'
 ```
 
+### Docker and Helm deployment
+
+Build the production image:
+
+```bash
+make docker-build IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal IMAGE_TAG=0.1.0
+```
+
+Lint and render the Helm chart:
+
+```bash
+make helm-lint
+make helm-template IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal IMAGE_TAG=0.1.0
+```
+
+Package the chart:
+
+```bash
+make helm-package
+```
+
+Install or upgrade with Helm:
+
+```bash
+make helm-install \
+  HELM_RELEASE=llm-infer-cal \
+  HELM_NAMESPACE=llm-infer-cal \
+  IMAGE_REPOSITORY=172.28.0.32:3443/xrwang/llm-infer-cal \
+  IMAGE_TAG=0.1.0
+```
+
+If Ingress is disabled, port-forward the service:
+
+```bash
+kubectl -n llm-infer-cal port-forward svc/llm-infer-cal 8080:80
+```
+
+Then open `http://127.0.0.1:8080`.
+
+For registry and Ingress overrides:
+
+```bash
+helm upgrade --install llm-infer-cal charts/llm-infer-cal \
+  --namespace llm-infer-cal \
+  --create-namespace \
+  --set-string image.repository=172.28.0.32:3443/xrwang/llm-infer-cal \
+  --set-string image.tag=0.1.0 \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=llm-infer-cal.example.com
+```
+
+See [docs/deployment.md](docs/deployment.md) for the full deployment notes.
+
 ## Project Layout
 
 ```text
@@ -326,4 +379,3 @@ cargo build --release
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
-
