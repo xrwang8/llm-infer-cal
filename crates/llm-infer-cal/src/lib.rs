@@ -50,9 +50,9 @@ Options:
           Output token budget for total-latency math [default: 512]
       --target-tokens-per-sec <TARGET_TOKENS_PER_SEC>
           SLA: per-user decode tokens/second (drives L bound) [default: 30]
-      --prefill-util <PREFILL_UTIL>
+      --prefill-utilization <PREFILL_UTILIZATION>
           Compute utilization factor for prefill [default: 0.4]
-      --decode-bw-util <DECODE_BW_UTIL>
+      --decode-bw-utilization <DECODE_BW_UTILIZATION>
           Memory-bandwidth utilization factor for decode [default: 0.5]
       --concurrency-degradation <CONCURRENCY_DEGRADATION>
           High-concurrency throughput degradation factor [default: 1]
@@ -60,12 +60,22 @@ Options:
           KV cache precision in bits per element [default: 16]
       --paged-attention
           Apply paged-attention KV memory factor (0.75)
-      --target-concurrency <TARGET_CONCURRENCY>
+      --target-concurrent-requests <TARGET_CONCURRENT_REQUESTS>
           Target concurrent requests for VRAM pressure planning
-      --speculative-draft-model <SPECULATIVE_DRAFT_MODEL>
-          Separate draft/EAGLE model id; its safetensors size is added to resident VRAM
+      --speculative-enabled
+          Enable speculative decoding (MTP mode)
+      --speculative-mode <SPECULATIVE_MODE>
+          Speculative decoding mode: mtp (default and only supported)
+      --speculative-num-draft-tokens <SPECULATIVE_NUM_DRAFT_TOKENS>
+          Number of draft tokens for speculative decoding [default: 8]
+      --speculative-draft-model-id <SPECULATIVE_DRAFT_MODEL_ID>
+          Draft/EAGLE model id; its safetensors size is added to resident VRAM (standard mode only)
       --speculative-extra-weight-gb <SPECULATIVE_EXTRA_WEIGHT_GB>
           Additional speculative decoding resident weight in GiB [default: 0]
+      --expert-offloading
+          Enable MoE expert offloading (keep subset of experts on GPU)
+      --experts-on-gpu <EXPERTS_ON_GPU>
+          Number of MoE experts to keep on GPU (requires --expert-offloading)
       --cpu-offload-gb <CPU_OFFLOAD_GB>
           Per-GPU CPU/offload budget in GiB, subtracted from GPU-resident weights [default: 0]
       --explain
@@ -99,14 +109,19 @@ const COMPLETION_OPTIONS: &[&str] = &[
     "--input-tokens",
     "--output-tokens",
     "--target-tokens-per-sec",
-    "--prefill-util",
-    "--decode-bw-util",
+    "--prefill-utilization",
+    "--decode-bw-utilization",
     "--concurrency-degradation",
     "--kv-cache-bits",
     "--paged-attention",
-    "--target-concurrency",
-    "--speculative-draft-model",
+    "--target-concurrent-requests",
+    "--speculative-enabled",
+    "--speculative-mode",
+    "--speculative-num-draft-tokens",
+    "--speculative-draft-model-id",
     "--speculative-extra-weight-gb",
+    "--expert-offloading",
+    "--experts-on-gpu",
     "--cpu-offload-gb",
     "--explain",
     "--llm-review",
@@ -184,12 +199,12 @@ struct Cli {
     target_tokens_per_sec: f64,
 
     /// Compute utilization factor for prefill.
-    #[arg(long = "prefill-util", default_value_t = 0.40)]
-    prefill_util: f64,
+    #[arg(long = "prefill-utilization", default_value_t = 0.40)]
+    prefill_utilization: f64,
 
     /// Memory-bandwidth utilization factor for decode.
-    #[arg(long = "decode-bw-util", default_value_t = 0.50)]
-    decode_bw_util: f64,
+    #[arg(long = "decode-bw-utilization", default_value_t = 0.50)]
+    decode_bw_utilization: f64,
 
     /// High-concurrency throughput degradation factor.
     #[arg(long = "concurrency-degradation", default_value_t = 1.0)]
@@ -204,16 +219,36 @@ struct Cli {
     paged_attention: bool,
 
     /// Target concurrent requests for VRAM pressure planning.
-    #[arg(long = "target-concurrency")]
-    target_concurrency: Option<u64>,
+    #[arg(long = "target-concurrent-requests")]
+    target_concurrent_requests: Option<u64>,
 
-    /// Separate draft/EAGLE model id; its safetensors size is added to resident VRAM.
-    #[arg(long = "speculative-draft-model")]
-    speculative_draft_model: Option<String>,
+    /// Enable speculative decoding (MTP mode by default).
+    #[arg(long = "speculative-enabled")]
+    speculative_enabled: bool,
+
+    /// Speculative decoding mode (only 'mtp' supported; evaluation always uses MTP).
+    #[arg(long = "speculative-mode", default_value = "mtp")]
+    speculative_mode: String,
+
+    /// Number of draft tokens for speculative decoding (MTP mode).
+    #[arg(long = "speculative-num-draft-tokens", default_value_t = 8)]
+    speculative_num_draft_tokens: u64,
+
+    /// Draft/EAGLE model id for standard speculative mode; its safetensors size is added to resident VRAM.
+    #[arg(long = "speculative-draft-model-id")]
+    speculative_draft_model_id: Option<String>,
 
     /// Additional speculative decoding resident weight in GiB.
     #[arg(long = "speculative-extra-weight-gb", default_value_t = 0.0)]
     speculative_extra_weight_gb: f64,
+
+    /// Enable MoE expert offloading (keep subset of experts on GPU).
+    #[arg(long = "expert-offloading")]
+    expert_offloading: bool,
+
+    /// Number of MoE experts to keep on GPU (requires --expert-offloading).
+    #[arg(long = "experts-on-gpu")]
+    experts_on_gpu: Option<u64>,
 
     /// Per-GPU CPU/offload budget in GiB, subtracted from GPU-resident weights.
     #[arg(long = "cpu-offload-gb", default_value_t = 0.0)]
@@ -288,8 +323,8 @@ where
     if cli.kv_cache_bits == 0 {
         return CliExit::err(1, "--kv-cache-bits must be greater than 0.\n");
     }
-    if matches!(cli.target_concurrency, Some(0)) {
-        return CliExit::err(1, "--target-concurrency must be greater than 0.\n");
+    if matches!(cli.target_concurrent_requests, Some(0)) {
+        return CliExit::err(1, "--target-concurrent-requests must be greater than 0.\n");
     }
     if !cli.speculative_extra_weight_gb.is_finite() || cli.speculative_extra_weight_gb < 0.0 {
         return CliExit::err(
@@ -336,13 +371,27 @@ where
         Err(message) => return CliExit::err(1, message),
     };
     let evaluator = Evaluator::new(source, ArtifactCache::with_default_ttl(None).ok());
+
+    // Speculative decoding draft model (for standard mode only)
     let speculative_draft_model_id = cli
-        .speculative_draft_model
+        .speculative_draft_model_id
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+
     let speculative_extra_weight_bytes = gib_to_bytes(cli.speculative_extra_weight_gb);
+
+    // Determine speculative mode: always MTP when enabled
+    let speculative_mode = if cli.speculative_mode.trim().eq_ignore_ascii_case("mtp") {
+        SpeculativeMode::Mtp
+    } else if cli.speculative_mode.trim().eq_ignore_ascii_case("standard") {
+        SpeculativeMode::Standard
+    } else {
+        // Default to MTP if unknown
+        SpeculativeMode::Mtp
+    };
+
     let options = EvaluationOptions {
         gpu_count: cli.gpu_count,
         context_length: cli.context_length,
@@ -350,21 +399,24 @@ where
         input_tokens: Some(cli.input_tokens),
         output_tokens: Some(cli.output_tokens),
         target_tokens_per_sec: Some(cli.target_tokens_per_sec),
-        prefill_utilization: cli.prefill_util,
-        decode_bw_utilization: cli.decode_bw_util,
+        prefill_utilization: cli.prefill_utilization,
+        decode_bw_utilization: cli.decode_bw_utilization,
         concurrency_degradation: cli.concurrency_degradation,
         kv_cache_bits: cli.kv_cache_bits,
         paged_attention: cli.paged_attention,
-        target_concurrent_requests: cli.target_concurrency,
-        speculative_enabled: speculative_draft_model_id.is_some()
-            || speculative_extra_weight_bytes > 0,
-        speculative_mode: SpeculativeMode::Standard,
-        speculative_num_draft_tokens: None,
+        target_concurrent_requests: cli.target_concurrent_requests,
+        speculative_enabled: cli.speculative_enabled,
+        speculative_mode,
+        speculative_num_draft_tokens: if cli.speculative_enabled {
+            Some(cli.speculative_num_draft_tokens)
+        } else {
+            None
+        },
         speculative_draft_model_id,
         speculative_extra_weight_bytes,
         cpu_offload_bytes_per_gpu: gib_to_bytes(cli.cpu_offload_gb),
-        expert_offloading: false,
-        experts_on_gpu: None,
+        expert_offloading: cli.expert_offloading,
+        experts_on_gpu: cli.experts_on_gpu,
     };
 
     let report = match evaluator.evaluate(model_id, gpu, &cli.engine, options) {

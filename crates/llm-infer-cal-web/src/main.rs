@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 #[tokio::main]
 async fn main() {
@@ -10,8 +10,13 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind web API listener");
-    println!("llm-infer-cal web API listening on http://{addr}");
-    axum::serve(listener, llm_infer_cal_web::app())
+    let app = std::env::var_os("LLM_INFER_CAL_STATIC_DIR")
+        .map(PathBuf::from)
+        .map(llm_infer_cal_web::app_with_static)
+        .unwrap_or_else(llm_infer_cal_web::app);
+
+    println!("llm-infer-cal web listening on http://{addr}");
+    axum::serve(listener, app)
         .await
         .expect("run web API");
 }

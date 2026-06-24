@@ -4,6 +4,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use std::path::{Path, PathBuf};
 use llm_infer_cal_core::{
     common::i18n::set_locale,
     core::{
@@ -23,23 +24,40 @@ use llm_infer_cal_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::{ServeDir, ServeFile},
+};
 
 const BUILTIN_MODEL_MANIFEST_JSON: &str =
     include_str!("../../llm-infer-cal-core/data/builtin_model_manifest.json");
 
 pub fn app() -> Router {
+    api_router().layer(cors_layer())
+}
+
+pub fn app_with_static(static_dir: impl AsRef<Path>) -> Router {
+    let static_dir = PathBuf::from(static_dir.as_ref());
+    let index_html = static_dir.join("index.html");
+
+    api_router()
+        .fallback_service(ServeDir::new(static_dir).not_found_service(ServeFile::new(index_html)))
+        .layer(cors_layer())
+}
+
+fn api_router() -> Router {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/models", get(list_models))
         .route("/api/gpus", get(list_gpus))
         .route("/api/evaluate", post(evaluate))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+}
+
+fn cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any)
 }
 
 async fn list_models() -> Result<Json<Value>, ApiError> {

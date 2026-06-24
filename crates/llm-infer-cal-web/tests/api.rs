@@ -1,11 +1,63 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Method, Request, StatusCode};
 use serde_json::{json, Value};
+use std::{
+    fs,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tower::ServiceExt;
 
 async fn json_response(response: axum::response::Response) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn text_response(response: axum::response::Response) -> String {
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+#[tokio::test]
+async fn app_with_static_serves_frontend_and_keeps_api_routes() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let static_dir = std::env::temp_dir().join(format!(
+        "llm-infer-cal-web-static-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&static_dir).unwrap();
+    fs::write(
+        static_dir.join("index.html"),
+        "<html><body>llm-infer-cal static shell</body></html>",
+    )
+    .unwrap();
+
+    let app = llm_infer_cal_web::app_with_static(&static_dir);
+    let health = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+    assert_eq!(text_response(health).await, "ok");
+
+    let index = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(index.status(), StatusCode::OK);
+    assert!(text_response(index)
+        .await
+        .contains("llm-infer-cal static shell"));
+
+    fs::remove_dir_all(static_dir).unwrap();
 }
 
 #[tokio::test]

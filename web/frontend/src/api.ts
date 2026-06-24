@@ -1,6 +1,7 @@
 import { buildEvaluatePayload, type EvaluateForm, type GpuSummary, type ModelSummary, type Report } from './report';
 
-export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8080';
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+export const API_BASE = configuredApiBase || '';
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
