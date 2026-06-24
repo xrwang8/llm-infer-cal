@@ -96,6 +96,8 @@ const kvPrecisionOptions = [
   { value: '4', label: 'INT4', sublabel: '实验性低精度 KV cache' },
 ] as const;
 
+type SpeculativeMode = 'standard' | 'mtp';
+
 const gpuCountOptions = ['', '1', '2', '4', '8', '16', '32', '64'];
 
 type SelectOption = {
@@ -106,9 +108,36 @@ type SelectOption = {
   disabled?: boolean;
 };
 
+export function isReportCurrent(
+  report: Pick<Report, 'model' | 'engine' | 'hardware'> | null | undefined,
+  form: Pick<EvaluateForm, 'model_id' | 'source' | 'engine' | 'gpu' | 'gpus'>,
+  selectedGpuId?: string,
+) {
+  if (!report) return false;
+
+  const expectedModelId = form.model_id.trim();
+  if (expectedModelId && report.model?.id !== expectedModelId) return false;
+  if (report.model?.source && report.model.source !== form.source) return false;
+  if (report.engine && report.engine !== form.engine) return false;
+
+  const expectedGpuId = (selectedGpuId || form.gpus[0] || form.gpu || '').trim();
+  const reportGpu = report.hardware;
+  if (expectedGpuId && reportGpu?.id && reportGpu.id !== expectedGpuId && !reportGpu.aliases?.includes(expectedGpuId)) {
+    return false;
+  }
+
+  return true;
+}
+
 export function App() {
   const [form, setForm] = useState<EvaluateForm>(DEFAULT_FORM);
   const [activeTab, setActiveTab] = useState<'calculator' | 'compare'>('calculator');
+  const [speculativeEnabled, setSpeculativeEnabled] = useState(false);
+  const [speculativeMode, setSpeculativeMode] = useState<SpeculativeMode>('standard');
+  const [specDraftModelSize, setSpecDraftModelSize] = useState(0.5);
+  const [specNumDraftTokens, setSpecNumDraftTokens] = useState(4);
+  const [expertOffloading, setExpertOffloading] = useState(false);
+  const [numGpuExperts, setNumGpuExperts] = useState(8);
   const [modelVendor, setModelVendor] = useState('Qwen');
   const [gpuVendor, setGpuVendor] = useState('NVIDIA');
   const [compareVendor, setCompareVendor] = useState('all');
@@ -152,24 +181,30 @@ export function App() {
   const gpuGroups = useMemo(() => groupGpusByVendor(gpus), [gpus]);
   const modelOptions = useMemo(() => itemsForGroup(modelGroups, modelVendor), [modelGroups, modelVendor]);
   const gpuOptions = useMemo(() => itemsForGroup(gpuGroups, gpuVendor), [gpuGroups, gpuVendor]);
-  const selectedFleet = bestFleetOption(report?.fleet);
-  const command = report?.generated_command?.command ?? '';
-  const comparisonReports = report?.comparison?.reports ?? [];
-  const kvRows = report?.kv_cache_by_context ?? [];
-  const activationRows = report?.activation_by_context ?? [];
-  const weightBytes = annotatedValue<number>(report?.weights?.safetensors_total_bytes);
-  const params = annotatedValue<number>(report?.weights?.params_estimated);
-  const activeParams = annotatedValue<number>(report?.weights?.active_params_estimated);
-  const maxConcurrent = annotatedValue<number>(report?.performance?.max_concurrent);
-  const prefillMs = annotatedValue<number>(report?.performance?.prefill?.latency_ms);
-  const clusterTps = annotatedValue<number>(report?.performance?.decode?.cluster_tokens_per_sec);
-  const engineSupport = report?.engine_compatibility?.support ?? 'unknown';
+  const visibleReport = isReportCurrent(report, form, selectedGpuId) ? report : null;
+  const selectedFleet = bestFleetOption(visibleReport?.fleet);
+  const command = visibleReport?.generated_command?.command ?? '';
+  const comparisonReports = visibleReport?.comparison?.reports ?? [];
+  const kvRows = visibleReport?.kv_cache_by_context ?? [];
+  const activationRows = visibleReport?.activation_by_context ?? [];
+  const weightBytes = annotatedValue<number>(visibleReport?.weights?.safetensors_total_bytes);
+  const params = annotatedValue<number>(visibleReport?.weights?.params_estimated);
+  const activeParams = annotatedValue<number>(visibleReport?.weights?.active_params_estimated);
+  const maxConcurrent = annotatedValue<number>(visibleReport?.performance?.max_concurrent);
+  const prefillMs = annotatedValue<number>(visibleReport?.performance?.prefill?.latency_ms);
+  const clusterTps = annotatedValue<number>(visibleReport?.performance?.decode?.cluster_tokens_per_sec);
+  const engineSupport = visibleReport?.engine_compatibility?.support ?? 'unknown';
   const advancedControls = advancedSettings();
   const reviewerSettings = llmReviewSettings();
-  const selectedModelLabel = (report?.model?.id ?? form.model_id) || '选择模型';
+  const selectedModelLabel = (visibleReport?.model?.id ?? form.model_id) || '选择模型';
   const contextValue = numericValue(form.context_length) ?? selectedFleet?.kv_reference_context_tokens ?? kvRows.at(-1)?.context_tokens ?? 40960;
   const contextMax = Math.max(contextValue, kvRows.at(-1)?.context_tokens ?? 0, 131072);
   const concurrentValue = numericValue(form.target_concurrent_requests) ?? selectedFleet?.tier_concurrent_requests ?? selectedFleet?.max_concurrent_at_reference_ctx ?? 1;
+  const moeTraits = visibleReport?.architecture?.moe;
+  const isMoe = !!moeTraits || (!!params && !!activeParams && activeParams < params);
+  const totalExperts = Number(moeTraits?.routed_experts ?? moeTraits?.num_routed_experts ?? 8);
+  const activeExperts = Number(moeTraits?.experts_per_token ?? moeTraits?.num_experts_per_tok ?? 1);
+  const supportsMtpMode = supportsMtp(form.model_id);
   const compareGpuIds = useMemo(() => {
     const filtered = gpus.filter((gpu) => {
       const vendorOk = compareVendor === 'all' || gpu.vendor === compareVendor;
@@ -178,6 +213,14 @@ export function App() {
     });
     return filtered.map((gpu) => gpu.id).slice(0, 64);
   }, [gpus, compareVendor, compareTier]);
+
+  useEffect(() => {
+    if (!isMoe) {
+      setExpertOffloading(false);
+      return;
+    }
+    setNumGpuExperts((current) => Math.max(activeExperts || 1, Math.min(current || activeExperts || 1, totalExperts || current || 8)));
+  }, [isMoe, activeExperts, totalExperts]);
 
   async function runEvaluation(nextForm = form) {
     setEvaluating(true);
@@ -230,6 +273,43 @@ export function App() {
     setForm((current) => ({ ...current, gpu: gpuId, gpus: gpuId ? [gpuId] : [] }));
   }
 
+  function updateSpeculativeEnabled(enabled: boolean) {
+    setSpeculativeEnabled(enabled);
+    if (!enabled) {
+      setForm((current) => ({ ...current, speculative_draft_model_id: '', speculative_extra_weight_gb: '' }));
+      return;
+    }
+
+    setSpeculativeMode('standard');
+    setForm((current) => ({
+      ...current,
+      speculative_draft_model_id: '',
+      speculative_extra_weight_gb: draftModelWeightGb(specDraftModelSize),
+    }));
+  }
+
+  function updateSpeculativeMode(nextMode: SpeculativeMode) {
+    setSpeculativeMode(nextMode);
+    setForm((current) => {
+      return {
+        ...current,
+        speculative_draft_model_id: '',
+        speculative_extra_weight_gb: nextMode === 'mtp' ? '0.3' : draftModelWeightGb(specDraftModelSize),
+      };
+    });
+  }
+
+  function updateSpecDraftModelSize(value: number) {
+    setSpecDraftModelSize(value);
+    if (speculativeEnabled && speculativeMode === 'standard') {
+      setForm((current) => ({ ...current, speculative_extra_weight_gb: draftModelWeightGb(value) }));
+    }
+  }
+
+  function updateSpecNumDraftTokens(value: number) {
+    setSpecNumDraftTokens(value);
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     if (activeTab === 'compare') {
@@ -252,6 +332,12 @@ export function App() {
 
   function resetForm() {
     setForm(DEFAULT_FORM);
+    setSpeculativeEnabled(false);
+    setSpeculativeMode('standard');
+    setSpecDraftModelSize(0.5);
+    setSpecNumDraftTokens(4);
+    setExpertOffloading(false);
+    setNumGpuExperts(8);
     setModelVendor('Qwen');
     setGpuVendor('NVIDIA');
     void runEvaluation(DEFAULT_FORM);
@@ -294,8 +380,7 @@ export function App() {
               <Cpu size={17} />
             </div>
             <div className="brandText">
-              <span>LLM VRAM Calculator</span>
-              <b>v4.0</b>
+              <span>llm-infer-cal</span>
             </div>
             <span className="crumb">
               <ChevronRight size={14} />
@@ -315,7 +400,7 @@ export function App() {
           <div>
             <h1>GPU Memory & Performance Estimator</h1>
             <p>
-              估算 LLM 推理显存、TTFT、tok/s 和多 GPU 方案。界面按 v0 calculator 的 light 风格组织，计算仍使用本项目后端。
+              估算 LLM 推理显存、TTFT、tok/s 和多 GPU 方案，辅助选择模型、引擎和 GPU 部署规格。
             </p>
           </div>
           <nav className="viewTabs" aria-label="主视图">
@@ -407,7 +492,7 @@ export function App() {
                     </Field>
                   )}
 
-                  <ModelSpecGrid report={report} params={params} activeParams={activeParams} />
+                  <ModelSpecGrid report={visibleReport} params={params} activeParams={activeParams} />
                 </ConfigSection>
 
                 <Separator />
@@ -463,31 +548,112 @@ export function App() {
                 <ConfigSection icon={<Zap size={16} />} title="Inference Optimizations">
                   <SwitchField
                     label="Paged Attention"
-                    description="减少 KV cache 碎片和开销，后端按约 0.75 系数估算。"
+                    description="Reduces KV cache overhead by ~25%"
                     checked={form.paged_attention}
                     onChange={(value) => updateField('paged_attention', value)}
                   />
-                  <details className="advancedPanel">
-                    <summary>
-                      <span>
-                        <ChevronDown className="disclosureIcon" size={16} />
-                        Speculative / Draft / EAGLE
-                      </span>
-                    </summary>
-                    <div className="advancedGrid">
-                      <TextField
-                        label="Draft/EAGLE 模型 ID"
-                        value={form.speculative_draft_model_id}
-                        placeholder="可选：独立 draft model"
-                        onChange={(value) => updateField('speculative_draft_model_id', value)}
-                      />
-                      <NumberField
-                        label="Speculative 额外权重 GiB"
-                        value={form.speculative_extra_weight_gb}
-                        onChange={(value) => updateField('speculative_extra_weight_gb', value)}
-                      />
+                  <SwitchField
+                    label="Speculative Decoding"
+                    description="Draft / MTP model predicts, main model verifies"
+                    checked={speculativeEnabled}
+                    onChange={updateSpeculativeEnabled}
+                  />
+                  {speculativeEnabled ? (
+                    <div className="speculativeBox">
+                      {supportsMtpMode ? (
+                        <div className="modeButtons" role="group" aria-label="Speculative decoding mode">
+                          <button
+                            type="button"
+                            className={speculativeMode === 'standard' ? 'active' : ''}
+                            onClick={() => updateSpeculativeMode('standard')}
+                          >
+                            Standard
+                          </button>
+                          <button
+                            type="button"
+                            className={speculativeMode === 'mtp' ? 'active mtp' : ''}
+                            onClick={() => updateSpeculativeMode('mtp')}
+                          >
+                            MTP Mode
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {speculativeMode === 'standard' ? (
+                        <>
+                          <SliderWithInput
+                            label="Draft Model Size"
+                            min={0.1}
+                            max={3}
+                            step={0.1}
+                            value={specDraftModelSize}
+                            onValueChange={updateSpecDraftModelSize}
+                            format={(value) => `${value.toFixed(1)}B`}
+                            unit=""
+                            markers={[0.5, 1, 1.5, 2]}
+                          />
+                          <SliderWithInput
+                            label="Draft Tokens per Step"
+                            min={2}
+                            max={16}
+                            step={1}
+                            value={specNumDraftTokens}
+                            onValueChange={updateSpecNumDraftTokens}
+                            format={(value) => `${Math.round(value)}`}
+                            unit="tokens"
+                            markers={[2, 4, 8, 12, 16]}
+                          />
+                          <p>
+                            Draft model adds ~{draftModelWeightGb(specDraftModelSize)} GiB VRAM.
+                            Estimated speedup: {(1 + (specNumDraftTokens * 0.6) / 2).toFixed(1)}x at ~60% acceptance rate.
+                          </p>
+                        </>
+                      ) : (
+                        <div className="optimizationNotice mtp">
+                          <p>
+                            <strong>MTP (Multi-Token Prediction):</strong> Built-in speculative decoding using the model&apos;s native MTP heads.
+                            No separate draft model needed. Adds only ~0.3 GiB VRAM for the MTP heads. Estimated speedup: ~1.8x.
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  </details>
+                  ) : null}
+                  {isMoe ? (
+                    <>
+                      <SwitchField
+                        label="Expert Offloading"
+                        description="Keep select experts on GPU, offload rest to CPU"
+                        checked={expertOffloading}
+                        onChange={setExpertOffloading}
+                      />
+                      {expertOffloading ? (
+                        <div className="expertBox">
+                          <SliderWithInput
+                            label="Experts on GPU"
+                            min={Math.max(1, activeExperts)}
+                            max={Math.max(totalExperts, activeExperts)}
+                            step={1}
+                            value={Math.max(activeExperts, Math.min(numGpuExperts, totalExperts))}
+                            onValueChange={(value) => setNumGpuExperts(value)}
+                            format={(value) => `${Math.round(value)} / ${Math.max(totalExperts, activeExperts)}`}
+                            unit=""
+                            markers={[Math.max(1, activeExperts), Math.max(totalExperts, activeExperts)]}
+                          />
+                          <ExpertOffloadNotes
+                            activeExperts={activeExperts}
+                            totalExperts={Math.max(totalExperts, activeExperts)}
+                            expertsOnGpu={Math.max(activeExperts, Math.min(numGpuExperts, totalExperts))}
+                            weightBytes={weightBytes}
+                          />
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {form.paged_attention ? (
+                    <div className="optimizationNotice paged">
+                      <p>Paged attention enabled: KV cache memory reduced by ~25%. This is the default for vLLM, SGLang, and TensorRT-LLM.</p>
+                    </div>
+                  ) : null}
                   <details className="advancedPanel" data-testid="advanced-settings">
                     <summary>
                       <span>
@@ -548,8 +714,8 @@ export function App() {
                 </button>
               </PanelTitle>
               <div className="resultBody">
-                <FitStatus option={selectedFleet} hardware={report?.hardware ?? selectedGpu} />
-                <VramOverview option={selectedFleet} hardware={report?.hardware ?? selectedGpu} paged={form.paged_attention} />
+                <FitStatus option={selectedFleet} hardware={visibleReport?.hardware ?? selectedGpu} />
+                <VramOverview option={selectedFleet} hardware={visibleReport?.hardware ?? selectedGpu} paged={form.paged_attention} />
                 <MetricCards
                   selectedFleet={selectedFleet}
                   weightBytes={weightBytes}
@@ -557,10 +723,10 @@ export function App() {
                   clusterTps={clusterTps}
                   maxConcurrent={maxConcurrent}
                   form={form}
-                  hardware={report?.hardware ?? selectedGpu}
+                  hardware={visibleReport?.hardware ?? selectedGpu}
                 />
                 <SupportCallouts
-                  report={report}
+                  report={visibleReport}
                   form={form}
                   engineSupport={engineSupport}
                   activeParams={activeParams}
@@ -569,7 +735,7 @@ export function App() {
 
                 <section className="innerPanel">
                   <SectionTitle title="VRAM Breakdown" />
-                  <MemoryBreakdown option={selectedFleet} hardware={report?.hardware ?? selectedGpu} />
+                  <MemoryBreakdown option={selectedFleet} hardware={visibleReport?.hardware ?? selectedGpu} />
                   <div className="kvList">
                     {kvRows.map((row) => (
                       <div className="kvRow" key={row.context_tokens}>
@@ -591,8 +757,8 @@ export function App() {
                 <div className="contentGrid">
                   <section className="innerPanel">
                     <SectionTitle title="Fleet Options" />
-                    <FleetTable options={report?.fleet?.options ?? []} />
-                    <p className="noteText">{report?.fleet?.constraint_note_zh ?? report?.fleet?.constraint_note_en ?? selectedGpu?.notes_zh}</p>
+                    <FleetTable options={visibleReport?.fleet?.options ?? []} />
+                    <p className="noteText">{visibleReport?.fleet?.constraint_note_zh ?? visibleReport?.fleet?.constraint_note_en ?? selectedGpu?.notes_zh}</p>
                   </section>
 
                   <section className="innerPanel">
@@ -603,13 +769,13 @@ export function App() {
                         {copied ? <CheckCircle2 size={18} /> : <Clipboard size={18} />}
                       </button>
                     </div>
-                    <OptimizationList report={report} />
+                    <OptimizationList report={visibleReport} />
                   </section>
                 </div>
 
                 <section className="innerPanel">
                   <SectionTitle title="Formula Reference" />
-                  <FormulaReference report={report} form={form} activeParams={activeParams} />
+                  <FormulaReference report={visibleReport} form={form} activeParams={activeParams} />
                 </section>
 
                 <InferenceSimulation prefillMs={prefillMs} clusterTps={clusterTps} modelId={selectedModelLabel} />
@@ -640,9 +806,9 @@ export function App() {
 
       <footer className="pageFooter">
         <p>Estimates are physics-based approximations. Real-world performance varies by framework, driver version, and system memory bandwidth.</p>
-        <a href="https://github.com/Shun-Calvin/llm-vram-calculator" target="_blank" rel="noopener noreferrer">
+        <a href="https://github.com/xrwang8/llm-infer-cal" target="_blank" rel="noopener noreferrer">
           <Github size={14} />
-          Shun-Calvin/llm-vram-calculator
+          xrwang8/llm-infer-cal
         </a>
       </footer>
     </div>
@@ -1464,6 +1630,60 @@ function OptimizationList({ report }: { report: Report | null }) {
   );
 }
 
+function ExpertOffloadNotes({
+  activeExperts,
+  totalExperts,
+  expertsOnGpu,
+  weightBytes,
+}: {
+  activeExperts: number;
+  totalExperts: number;
+  expertsOnGpu: number;
+  weightBytes?: number;
+}) {
+  const recommendedMin = Math.max(activeExperts, Math.ceil(totalExperts * 0.15));
+  const recommendedMax = Math.min(totalExperts, Math.ceil(totalExperts * 0.4));
+  const fullWeightsGb = (weightBytes ?? 0) / 1_000_000_000;
+  const offloadedFraction = 1 - expertsOnGpu / totalExperts;
+  const savedVram = Math.max(0, fullWeightsGb * offloadedFraction * 0.7);
+
+  return (
+    <div className="expertNotes">
+      {expertsOnGpu < recommendedMin ? (
+        <div className="optimizationNotice warn">
+          <p>
+            <strong>Suggestion:</strong> Try keeping at least {recommendedMin} experts on GPU.
+            {activeExperts > 1
+              ? ` This model activates ${activeExperts} experts per token, so fewer than this causes frequent PCIe transfers.`
+              : ' Keeping a small routing buffer on GPU helps when routing shifts.'}
+          </p>
+        </div>
+      ) : null}
+      {expertsOnGpu < totalExperts ? (
+        <div className="optimizationNotice expert">
+          <p>
+            <strong>VRAM saved:</strong> ~{savedVram.toFixed(2)} GB on weights.
+            <span> Offloaded experts: {totalExperts - expertsOnGpu}/{totalExperts}</span>
+          </p>
+        </div>
+      ) : null}
+      {expertsOnGpu >= recommendedMin && expertsOnGpu <= recommendedMax ? (
+        <div className="optimizationNotice paged">
+          <p>
+            <strong>Recommended range:</strong> {recommendedMin}-{recommendedMax} experts on GPU balances VRAM savings with performance.
+          </p>
+        </div>
+      ) : null}
+      <div className="optimizationNotice neutral">
+        <p>
+          <strong>Why this matters:</strong> In MoE models, only {activeExperts} of {totalExperts} experts compute per token,
+          but expert weights still drive resident VRAM. Offloading saves memory but adds PCIe transfer latency when offloaded experts are routed.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function requiredBytes(option?: FleetOption): number {
   if (!option) return 0;
   const concurrent = option.tier_concurrent_requests ?? 1;
@@ -1474,6 +1694,20 @@ function requiredBytes(option?: FleetOption): number {
 function numericValue(value: string): number | undefined {
   const parsed = Number(value);
   return Number.isFinite(parsed) && value.trim() ? parsed : undefined;
+}
+
+function supportsMtp(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return (
+    lower.includes('deepseek-v3') ||
+    lower.includes('deepseek_r1') ||
+    lower.includes('deepseek-r1') ||
+    lower.includes('deepseek-prover')
+  );
+}
+
+function draftModelWeightGb(sizeBillionParams: number): string {
+  return ((sizeBillionParams * 1_000_000_000 * 2) / 1024 ** 3).toFixed(2);
 }
 
 function formatCompact(value: number): string {
