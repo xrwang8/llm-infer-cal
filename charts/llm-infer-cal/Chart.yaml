@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llm-infer-cal
+description: Web UI and API for estimating LLM inference memory and GPU deployment options.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

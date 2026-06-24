@@ -16,7 +16,5 @@ async fn main() {
         .unwrap_or_else(llm_infer_cal_web::app);
 
     println!("llm-infer-cal web listening on http://{addr}");
-    axum::serve(listener, app)
-        .await
-        .expect("run web API");
+    axum::serve(listener, app).await.expect("run web API");
 }

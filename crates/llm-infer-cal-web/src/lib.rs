@@ -4,7 +4,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use std::path::{Path, PathBuf};
 use llm_infer_cal_core::{
     common::i18n::set_locale,
     core::{
@@ -24,6 +23,7 @@ use llm_infer_cal_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use tower_http::{
     cors::{Any, CorsLayer},
     services::{ServeDir, ServeFile},

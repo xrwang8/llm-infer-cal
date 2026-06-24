@@ -50,26 +50,30 @@ Options:
           Output token budget for total-latency math [default: 512]
       --target-tokens-per-sec <TARGET_TOKENS_PER_SEC>
           SLA: per-user decode tokens/second (drives L bound) [default: 30]
-      --prefill-utilization <PREFILL_UTILIZATION>
+      --prefill-util <PREFILL_UTILIZATION>
           Compute utilization factor for prefill [default: 0.4]
-      --decode-bw-utilization <DECODE_BW_UTILIZATION>
+          Alias: --prefill-utilization
+      --decode-bw-util <DECODE_BW_UTILIZATION>
           Memory-bandwidth utilization factor for decode [default: 0.5]
+          Alias: --decode-bw-utilization
       --concurrency-degradation <CONCURRENCY_DEGRADATION>
           High-concurrency throughput degradation factor [default: 1]
       --kv-cache-bits <KV_CACHE_BITS>
           KV cache precision in bits per element [default: 16]
       --paged-attention
           Apply paged-attention KV memory factor (0.75)
-      --target-concurrent-requests <TARGET_CONCURRENT_REQUESTS>
+      --target-concurrency <TARGET_CONCURRENT_REQUESTS>
           Target concurrent requests for VRAM pressure planning
+          Alias: --target-concurrent-requests
       --speculative-enabled
           Enable speculative decoding (MTP mode)
       --speculative-mode <SPECULATIVE_MODE>
           Speculative decoding mode: mtp (default and only supported)
       --speculative-num-draft-tokens <SPECULATIVE_NUM_DRAFT_TOKENS>
           Number of draft tokens for speculative decoding [default: 8]
-      --speculative-draft-model-id <SPECULATIVE_DRAFT_MODEL_ID>
+      --speculative-draft-model <SPECULATIVE_DRAFT_MODEL_ID>
           Draft/EAGLE model id; its safetensors size is added to resident VRAM (standard mode only)
+          Alias: --speculative-draft-model-id
       --speculative-extra-weight-gb <SPECULATIVE_EXTRA_WEIGHT_GB>
           Additional speculative decoding resident weight in GiB [default: 0]
       --expert-offloading
@@ -109,15 +113,19 @@ const COMPLETION_OPTIONS: &[&str] = &[
     "--input-tokens",
     "--output-tokens",
     "--target-tokens-per-sec",
+    "--prefill-util",
     "--prefill-utilization",
+    "--decode-bw-util",
     "--decode-bw-utilization",
     "--concurrency-degradation",
     "--kv-cache-bits",
     "--paged-attention",
+    "--target-concurrency",
     "--target-concurrent-requests",
     "--speculative-enabled",
     "--speculative-mode",
     "--speculative-num-draft-tokens",
+    "--speculative-draft-model",
     "--speculative-draft-model-id",
     "--speculative-extra-weight-gb",
     "--expert-offloading",
@@ -199,11 +207,19 @@ struct Cli {
     target_tokens_per_sec: f64,
 
     /// Compute utilization factor for prefill.
-    #[arg(long = "prefill-utilization", default_value_t = 0.40)]
+    #[arg(
+        long = "prefill-utilization",
+        alias = "prefill-util",
+        default_value_t = 0.40
+    )]
     prefill_utilization: f64,
 
     /// Memory-bandwidth utilization factor for decode.
-    #[arg(long = "decode-bw-utilization", default_value_t = 0.50)]
+    #[arg(
+        long = "decode-bw-utilization",
+        alias = "decode-bw-util",
+        default_value_t = 0.50
+    )]
     decode_bw_utilization: f64,
 
     /// High-concurrency throughput degradation factor.
@@ -219,7 +235,7 @@ struct Cli {
     paged_attention: bool,
 
     /// Target concurrent requests for VRAM pressure planning.
-    #[arg(long = "target-concurrent-requests")]
+    #[arg(long = "target-concurrent-requests", alias = "target-concurrency")]
     target_concurrent_requests: Option<u64>,
 
     /// Enable speculative decoding (MTP mode by default).
@@ -235,7 +251,7 @@ struct Cli {
     speculative_num_draft_tokens: u64,
 
     /// Draft/EAGLE model id for standard speculative mode; its safetensors size is added to resident VRAM.
-    #[arg(long = "speculative-draft-model-id")]
+    #[arg(long = "speculative-draft-model-id", alias = "speculative-draft-model")]
     speculative_draft_model_id: Option<String>,
 
     /// Additional speculative decoding resident weight in GiB.

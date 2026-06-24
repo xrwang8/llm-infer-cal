@@ -1,0 +1,9 @@
+llm-infer-cal has been installed.
+
+To access it without an Ingress:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "llm-infer-cal.fullname" . }} 8080:{{ .Values.service.port }}
+
+Then open:
+
+  http://127.0.0.1:8080
