@@ -1,8 +1,16 @@
-use llm_infer_cal_core::core::evaluator::{EvaluationOptions, Evaluator};
+use llm_infer_cal_core::core::evaluator::{EvaluationOptions, Evaluator, SpeculativeMode};
 use llm_infer_cal_core::model_source::base::{
     ModelArtifact, ModelNotFoundError, ModelSource, ModelSourceError, SiblingFile,
 };
 use serde_json::json;
+
+#[test]
+fn evaluation_options_default_to_mtp_speculative_mode() {
+    assert_eq!(
+        EvaluationOptions::default().speculative_mode,
+        SpeculativeMode::Mtp
+    );
+}
 
 #[derive(Clone)]
 struct StaticSource {

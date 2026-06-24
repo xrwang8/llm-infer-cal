@@ -170,10 +170,19 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
     let speculative_enabled = req
         .speculative_enabled
         .unwrap_or_else(|| request_has_speculative_options(&req));
+    let requested_speculative_mode = req
+        .speculative_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let speculative_mode = if speculative_enabled {
-        speculative_mode_from_request(req.speculative_mode.as_deref())?
+        if requested_speculative_mode.is_none() && request_has_draft_model_id(&req) {
+            SpeculativeMode::Standard
+        } else {
+            speculative_mode_from_request(requested_speculative_mode)?
+        }
     } else {
-        SpeculativeMode::Standard
+        SpeculativeMode::Mtp
     };
     let speculative_extra_weight_bytes = if speculative_enabled {
         memory_bytes_from_request(
@@ -306,10 +315,7 @@ fn memory_bytes_from_request(
 }
 
 fn request_has_speculative_options(req: &EvaluateRequest) -> bool {
-    req.speculative_draft_model_id
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|value| !value.is_empty())
+    request_has_draft_model_id(req)
         || req
             .speculative_extra_weight_bytes
             .is_some_and(|value| value > 0)
@@ -318,15 +324,17 @@ fn request_has_speculative_options(req: &EvaluateRequest) -> bool {
             .is_some_and(|value| value != 0.0)
 }
 
+fn request_has_draft_model_id(req: &EvaluateRequest) -> bool {
+    req.speculative_draft_model_id
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
 fn speculative_mode_from_request(value: Option<&str>) -> Result<SpeculativeMode, ApiError> {
-    match value
-        .unwrap_or("standard")
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "" | "standard" => Ok(SpeculativeMode::Standard),
-        "mtp" => Ok(SpeculativeMode::Mtp),
+    match value.unwrap_or("mtp").trim().to_ascii_lowercase().as_str() {
+        "" | "mtp" => Ok(SpeculativeMode::Mtp),
+        "standard" => Ok(SpeculativeMode::Standard),
         other => Err(ApiError::bad_request(format!(
             "speculative_mode must be standard or mtp, got '{other}'"
         ))),

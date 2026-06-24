@@ -86,7 +86,7 @@ impl Default for EvaluationOptions {
             paged_attention: false,
             target_concurrent_requests: None,
             speculative_enabled: false,
-            speculative_mode: SpeculativeMode::Standard,
+            speculative_mode: SpeculativeMode::Mtp,
             speculative_num_draft_tokens: None,
             speculative_draft_model_id: None,
             speculative_extra_weight_bytes: 0,
@@ -178,9 +178,16 @@ impl Evaluator {
             || requested_draft_model_id.is_some()
             || options.speculative_extra_weight_bytes > 0;
         let speculative_mode = if speculative_enabled {
-            options.speculative_mode
+            if !options.speculative_enabled
+                && requested_draft_model_id.is_some()
+                && options.speculative_mode == SpeculativeMode::Mtp
+            {
+                SpeculativeMode::Standard
+            } else {
+                options.speculative_mode
+            }
         } else {
-            SpeculativeMode::Standard
+            SpeculativeMode::Mtp
         };
         let speculative_draft_model_id =
             if speculative_enabled && speculative_mode == SpeculativeMode::Standard {

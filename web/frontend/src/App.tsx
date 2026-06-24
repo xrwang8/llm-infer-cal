@@ -49,6 +49,9 @@ import {
   type Report,
 } from './report';
 
+const DEFAULT_SPECULATIVE_MODE = 'mtp' as const;
+const DEFAULT_MTP_EXTRA_WEIGHT_GB = '0.3';
+
 const DEFAULT_FORM: EvaluateForm = {
   model_id: 'Qwen/Qwen3-30B-A3B',
   source: 'builtin',
@@ -66,7 +69,7 @@ const DEFAULT_FORM: EvaluateForm = {
   kv_cache_bits: '16',
   paged_attention: true,
   speculative_enabled: false,
-  speculative_mode: 'standard',
+  speculative_mode: DEFAULT_SPECULATIVE_MODE,
   speculative_num_draft_tokens: '4',
   target_concurrent_requests: '',
   speculative_draft_model_id: '',
@@ -79,6 +82,16 @@ const DEFAULT_FORM: EvaluateForm = {
   llm_review_base_url: '',
   llm_review_model: '',
 };
+
+export function defaultSpeculativeFormPatch(numDraftTokens: number) {
+  return {
+    speculative_enabled: true,
+    speculative_mode: DEFAULT_SPECULATIVE_MODE,
+    speculative_num_draft_tokens: String(Math.round(numDraftTokens)),
+    speculative_draft_model_id: '',
+    speculative_extra_weight_gb: DEFAULT_MTP_EXTRA_WEIGHT_GB,
+  };
+}
 
 const sourceOptions = [
   { value: 'builtin', label: '内置' },
@@ -134,7 +147,7 @@ export function App() {
   const [form, setForm] = useState<EvaluateForm>(DEFAULT_FORM);
   const [activeTab, setActiveTab] = useState<'calculator' | 'compare'>('calculator');
   const [speculativeEnabled, setSpeculativeEnabled] = useState(false);
-  const [speculativeMode, setSpeculativeMode] = useState<SpeculativeMode>('standard');
+  const [speculativeMode, setSpeculativeMode] = useState<SpeculativeMode>(DEFAULT_SPECULATIVE_MODE);
   const [specDraftModelSize, setSpecDraftModelSize] = useState(0.5);
   const [specNumDraftTokens, setSpecNumDraftTokens] = useState(4);
   const [expertOffloading, setExpertOffloading] = useState(false);
@@ -200,7 +213,6 @@ export function App() {
   const totalExperts = Number(moeTraits?.routed_experts ?? moeTraits?.num_routed_experts ?? 8);
   const activeExperts = Number(moeTraits?.experts_per_token ?? moeTraits?.num_experts_per_tok ?? 1);
   const requiresDraftModel = form.speculative_enabled && form.speculative_mode === 'standard' && !form.speculative_draft_model_id.trim();
-  const supportsMtpMode = supportsMtp(form.model_id);
   const compareGpuIds = useMemo(() => {
     const filtered = gpus.filter((gpu) => {
       const vendorOk = compareVendor === 'all' || gpu.vendor === compareVendor;
@@ -280,7 +292,7 @@ export function App() {
       setForm((current) => ({
         ...current,
         speculative_enabled: false,
-        speculative_mode: 'standard',
+        speculative_mode: DEFAULT_SPECULATIVE_MODE,
         speculative_num_draft_tokens: '4',
         speculative_draft_model_id: '',
         speculative_extra_weight_gb: '',
@@ -288,13 +300,10 @@ export function App() {
       return;
     }
 
-    setSpeculativeMode('standard');
+    setSpeculativeMode(DEFAULT_SPECULATIVE_MODE);
     setForm((current) => ({
       ...current,
-      speculative_enabled: true,
-      speculative_mode: 'standard',
-      speculative_num_draft_tokens: String(specNumDraftTokens),
-      speculative_extra_weight_gb: draftModelWeightGb(specDraftModelSize),
+      ...defaultSpeculativeFormPatch(specNumDraftTokens),
     }));
   }
 
@@ -305,7 +314,7 @@ export function App() {
         ...current,
         speculative_mode: nextMode,
         speculative_draft_model_id: nextMode === 'mtp' ? '' : current.speculative_draft_model_id,
-        speculative_extra_weight_gb: nextMode === 'mtp' ? '0.3' : draftModelWeightGb(specDraftModelSize),
+        speculative_extra_weight_gb: nextMode === 'mtp' ? DEFAULT_MTP_EXTRA_WEIGHT_GB : draftModelWeightGb(specDraftModelSize),
       };
     });
   }
@@ -360,7 +369,7 @@ export function App() {
   function resetForm() {
     setForm(DEFAULT_FORM);
     setSpeculativeEnabled(false);
-    setSpeculativeMode('standard');
+    setSpeculativeMode(DEFAULT_SPECULATIVE_MODE);
     setSpecDraftModelSize(0.5);
     setSpecNumDraftTokens(4);
     setExpertOffloading(false);
@@ -560,24 +569,22 @@ export function App() {
                   />
                   {speculativeEnabled ? (
                     <div className="speculativeBox">
-                      {supportsMtpMode ? (
-                        <div className="modeButtons" role="group" aria-label="Speculative decoding mode">
-                          <button
-                            type="button"
-                            className={speculativeMode === 'standard' ? 'active' : ''}
-                            onClick={() => updateSpeculativeMode('standard')}
-                          >
-                            Standard
-                          </button>
-                          <button
-                            type="button"
-                            className={speculativeMode === 'mtp' ? 'active mtp' : ''}
-                            onClick={() => updateSpeculativeMode('mtp')}
-                          >
-                            MTP Mode
-                          </button>
-                        </div>
-                      ) : null}
+                      <div className="modeButtons" role="group" aria-label="Speculative decoding mode">
+                        <button
+                          type="button"
+                          className={speculativeMode === 'standard' ? 'active' : ''}
+                          onClick={() => updateSpeculativeMode('standard')}
+                        >
+                          Standard
+                        </button>
+                        <button
+                          type="button"
+                          className={speculativeMode === 'mtp' ? 'active mtp' : ''}
+                          onClick={() => updateSpeculativeMode('mtp')}
+                        >
+                          MTP Mode
+                        </button>
+                      </div>
 
                       {speculativeMode === 'standard' ? (
                         <>
@@ -1630,7 +1637,6 @@ function InferenceProcess({ report, option }: { report: Report | null; option?: 
     <section className="innerPanel processPanel">
       <div className="processHeader">
         <SectionTitle title="推理过程" />
-        <span>--explain 默认开启</span>
       </div>
       <div className="processBox">
         <pre>{explainText || '等待评估结果'}</pre>
@@ -1782,16 +1788,6 @@ function explainContextLabel(tokens: number): string {
 function numericValue(value: string): number | undefined {
   const parsed = Number(value);
   return Number.isFinite(parsed) && value.trim() ? parsed : undefined;
-}
-
-function supportsMtp(modelId: string): boolean {
-  const lower = modelId.toLowerCase();
-  return (
-    lower.includes('deepseek-v3') ||
-    lower.includes('deepseek_r1') ||
-    lower.includes('deepseek-r1') ||
-    lower.includes('deepseek-prover')
-  );
 }
 
 function draftModelWeightGb(sizeBillionParams: number): string {

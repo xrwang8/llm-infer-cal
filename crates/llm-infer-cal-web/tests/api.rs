@@ -264,6 +264,35 @@ async fn evaluate_endpoint_echoes_mtp_speculative_mode_without_draft_model() {
 }
 
 #[tokio::test]
+async fn evaluate_endpoint_defaults_enabled_speculative_mode_to_mtp() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "engine": "vllm",
+        "speculative_enabled": true
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    assert_eq!(body["inference_options"]["speculative_enabled"], true);
+    assert_eq!(body["inference_options"]["speculative_mode"], "mtp");
+    assert!(body["inference_options"]["speculative_draft_model_id"].is_null());
+}
+
+#[tokio::test]
 async fn evaluate_endpoint_applies_expert_offload_to_moe_memory() {
     let payload = json!({
         "model_id": "Qwen/Qwen3-30B-A3B",

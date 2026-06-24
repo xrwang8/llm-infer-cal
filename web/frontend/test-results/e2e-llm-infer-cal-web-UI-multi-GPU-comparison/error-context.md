@@ -1,0 +1,319 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: e2e.test.ts >> llm-infer-cal web UI >> multi-GPU comparison
+- Location: e2e.test.ts:48:3
+
+# Error details
+
+```
+Test timeout of 30000ms exceeded.
+```
+
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e12]: llm-infer-cal
+        - generic [ref=e13]:
+          - img [ref=e14]
+          - text: Qwen/Qwen3-30B-A3B
+      - generic [ref=e16]:
+        - generic [ref=e17]: H100
+        - generic [ref=e18]: 2× GPU
+        - generic [ref=e19]: vllm
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - heading "GPU Memory Estimator" [level=1] [ref=e23]
+        - paragraph [ref=e24]: 估算 LLM 推理显存和多 GPU 方案，辅助选择模型、引擎和 GPU 部署规格。
+      - navigation "主视图" [ref=e25]:
+        - button "Calculator" [ref=e26] [cursor=pointer]:
+          - img [ref=e27]
+          - text: Calculator
+        - button "Compare GPUs" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+          - text: Compare GPUs
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - paragraph [ref=e40]: Configuration
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e43]:
+              - img [ref=e44]
+              - heading "GPU Configuration" [level=3] [ref=e47]
+            - generic [ref=e48]:
+              - generic [ref=e49]:
+                - generic [ref=e50]: Provider
+                - button "Provider" [ref=e52] [cursor=pointer]:
+                  - generic [ref=e54]: NVIDIA
+                  - img [ref=e55]
+              - generic [ref=e57]:
+                - generic [ref=e58]:
+                  - text: GPU Model
+                  - generic "选择用于推理的 GPU。显存、带宽、FP16 TFLOPS 会影响估算。" [ref=e59]:
+                    - img [ref=e60]
+                - button "GPU Model" [ref=e64] [cursor=pointer]:
+                  - generic [ref=e66]: H100
+                  - img [ref=e67]
+              - generic [ref=e69]:
+                - generic [ref=e70]:
+                  - paragraph [ref=e71]: VRAM
+                  - strong [ref=e72]: 80 GB
+                - generic [ref=e73]:
+                  - paragraph [ref=e74]: Mem BW
+                  - strong [ref=e75]: 3350 GB/s
+                - generic [ref=e76]:
+                  - paragraph [ref=e77]: FP16 TF
+                  - strong [ref=e78]: 989 TF
+              - generic [ref=e79]:
+                - generic [ref=e80]:
+                  - text: Number of GPUs
+                  - generic "空值表示由 planner 自动推荐；选择数值会强制 GPU 数。" [ref=e81]:
+                    - img [ref=e82]
+                - button "Number of GPUs" [ref=e85] [cursor=pointer]:
+                  - generic [ref=e87]: 自动推荐
+                  - img [ref=e88]
+          - generic [ref=e91]:
+            - generic [ref=e92]:
+              - img [ref=e93]
+              - heading "Model" [level=3] [ref=e98]
+            - generic [ref=e99]:
+              - generic [ref=e100]:
+                - generic [ref=e101]:
+                  - generic [ref=e102]: Source
+                  - button "Source" [ref=e104] [cursor=pointer]:
+                    - generic [ref=e106]: 内置
+                    - img [ref=e107]
+                - generic [ref=e109]:
+                  - generic [ref=e110]: Family
+                  - button "Family" [ref=e112] [cursor=pointer]:
+                    - generic [ref=e114]: Qwen
+                    - img [ref=e115]
+              - generic [ref=e117]:
+                - generic [ref=e118]: Model (70 available)
+                - button "Model (70 available)" [ref=e120] [cursor=pointer]:
+                  - generic [ref=e121]:
+                    - generic [ref=e122]: Qwen/Qwen3-30B-A3B
+                    - generic [ref=e123]: huggingface
+                  - img [ref=e124]
+              - generic [ref=e126]:
+                - generic [ref=e127]:
+                  - paragraph [ref=e128]: Total Params
+                  - strong [ref=e129]: 30.53B
+                - generic [ref=e130]:
+                  - paragraph [ref=e131]: Active Params
+                  - strong [ref=e132]: 3.35B
+                - generic [ref=e133]:
+                  - paragraph [ref=e134]: KV Heads
+                  - strong [ref=e135]: "4"
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - img [ref=e139]
+              - heading "Precision" [level=3] [ref=e143]
+            - generic [ref=e145]:
+              - generic [ref=e146]:
+                - generic [ref=e147]: Engine
+                - button "Engine" [ref=e149] [cursor=pointer]:
+                  - generic [ref=e151]: vLLM
+                  - img [ref=e152]
+              - generic [ref=e154]:
+                - generic [ref=e155]: KV Cache Precision
+                - button "KV Cache Precision" [ref=e157] [cursor=pointer]:
+                  - generic [ref=e159]: FP16/BF16
+                  - img [ref=e160]
+          - generic [ref=e163]:
+            - generic [ref=e164]:
+              - img [ref=e165]
+              - heading "Inference Optimizations" [level=3] [ref=e167]
+            - generic [ref=e168]:
+              - generic [ref=e169]:
+                - generic [ref=e170]:
+                  - generic [ref=e171]: Paged Attention
+                  - generic [ref=e172]: Reduces KV cache overhead by ~25%
+                - checkbox "Paged Attention Reduces KV cache overhead by ~25%" [checked]
+              - generic [ref=e174]:
+                - generic [ref=e175]:
+                  - generic [ref=e176]: Speculative Decoding
+                  - generic [ref=e177]: Draft / MTP model predicts, main model verifies
+                - checkbox "Speculative Decoding Draft / MTP model predicts, main model verifies"
+              - generic [ref=e179]:
+                - generic [ref=e180]:
+                  - generic [ref=e181]: Expert Offloading
+                  - generic [ref=e182]: Keep select experts on GPU, offload rest to CPU
+                - checkbox "Expert Offloading Keep select experts on GPU, offload rest to CPU"
+              - paragraph [ref=e185]: "Paged attention enabled: KV cache memory reduced by ~25%. This is the default for vLLM, SGLang, and TensorRT-LLM."
+              - group [ref=e186]:
+                - generic "高级设置" [ref=e187] [cursor=pointer]:
+                  - generic [ref=e188]:
+                    - img [ref=e189]
+                    - text: 高级设置
+          - button "开始评估" [ref=e191] [cursor=pointer]:
+            - img [ref=e192]
+            - generic [ref=e194]: 开始评估
+      - generic [ref=e195]:
+        - generic [ref=e196]:
+          - paragraph [ref=e199]: Estimates
+          - button "Reset to defaults" [ref=e200] [cursor=pointer]
+        - generic [ref=e201]:
+          - generic [ref=e202]:
+            - img [ref=e203]
+            - generic [ref=e206]:
+              - strong [ref=e207]: Fits comfortably
+              - paragraph [ref=e208]: 42.62 GB required / 80.00 GB available (2× H100)
+          - generic [ref=e209]:
+            - generic [ref=e210]:
+              - generic [ref=e211]: VRAM Utilization
+              - strong [ref=e212]: 53.3% of 80.00 GB
+            - generic [ref=e219]:
+              - generic [ref=e220]:
+                - text: Weights 30.53 GB
+                - generic [ref=e222]: (72%)
+              - generic [ref=e223]:
+                - text: KV Cache 12.08 GB (paged)
+                - generic [ref=e225]: (28%)
+              - generic [ref=e226]:
+                - text: Activations 8.65 MB
+                - generic [ref=e228]: (0%)
+          - generic [ref=e229]:
+            - generic [ref=e230]:
+              - generic [ref=e231]:
+                - img [ref=e232]
+                - generic [ref=e234]: Total VRAM
+              - strong [ref=e235]: 85.24 GB
+              - paragraph [ref=e236]: 2× H100 total required
+            - generic [ref=e237]:
+              - generic [ref=e238]:
+                - img [ref=e239]
+                - generic [ref=e243]: Model Weights / GPU
+              - strong [ref=e244]: 30.53 GB
+              - paragraph [ref=e245]: GPU resident model weights
+            - generic [ref=e246]:
+              - generic [ref=e247]:
+                - img [ref=e248]
+                - generic [ref=e250]: Recommended GPUs
+              - strong [ref=e251]: 2 张
+              - paragraph [ref=e252]: 开发
+          - generic [ref=e253]:
+            - generic [ref=e254]:
+              - img [ref=e255]
+              - paragraph [ref=e258]:
+                - strong [ref=e259]: 完整支持
+                - text: 当前模型和引擎配置可生成启动命令。
+            - generic [ref=e260]:
+              - img [ref=e261]
+              - paragraph [ref=e265]:
+                - strong [ref=e266]: "MoE Calculation Notes:"
+                - text: 权重显存按总参数常驻，Prefill/Decode 按 active params 估算。
+            - generic [ref=e267]:
+              - img [ref=e268]
+              - paragraph [ref=e270]:
+                - strong [ref=e271]: "Inference Optimizations Active:"
+                - text: Paged Attention 已启用。
+          - generic [ref=e272]:
+            - paragraph [ref=e273]: VRAM Breakdown
+            - generic [ref=e274]:
+              - generic [ref=e275]:
+                - generic [ref=e276]: Required / GPU (per GPU)
+                - strong [ref=e277]: 42.62 GB
+              - generic [ref=e279]:
+                - generic [ref=e280]: Main Weights / GPU
+                - strong [ref=e281]: 30.53 GB
+              - generic [ref=e285]:
+                - generic [ref=e286]: KV Cache × 8
+                - strong [ref=e287]: 12.08 GB
+              - generic [ref=e291]:
+                - generic [ref=e292]: Activation Working Set
+                - strong [ref=e293]: 8.65 MB
+              - generic [ref=e297]:
+                - generic [ref=e298]: Reserved / Framework
+                - strong [ref=e299]: 8.00 GB
+            - generic [ref=e302]:
+              - generic [ref=e303]:
+                - generic [ref=e304]: 4,096 ctx
+                - strong [ref=e305]: 301.99 MB
+                - generic [ref=e306]: 估算
+              - generic [ref=e307]:
+                - generic [ref=e308]: 32,768 ctx
+                - strong [ref=e309]: 2.42 GB
+                - generic [ref=e310]: 估算
+              - generic [ref=e311]:
+                - generic [ref=e312]: 40,960 ctx
+                - strong [ref=e313]: 3.02 GB
+                - generic [ref=e314]: 估算
+              - generic [ref=e315]:
+                - generic [ref=e316]: activation working set
+                - strong [ref=e317]: 17.30 MB
+                - generic [ref=e318]: 估算
+          - generic [ref=e319]:
+            - generic [ref=e320]:
+              - paragraph [ref=e321]: Fleet Options
+              - table [ref=e323]:
+                - rowgroup [ref=e324]:
+                  - row "层级 GPU TP 并发 状态" [ref=e325]:
+                    - columnheader "层级" [ref=e326]
+                    - columnheader "GPU" [ref=e327]
+                    - columnheader "TP" [ref=e328]
+                    - columnheader "并发" [ref=e329]
+                    - columnheader "状态" [ref=e330]
+                - rowgroup [ref=e331]:
+                  - row "最小 1 1 3 可行" [ref=e332]:
+                    - cell "最小" [ref=e333]
+                    - cell "1" [ref=e334]
+                    - cell "1" [ref=e335]
+                    - cell "3" [ref=e336]
+                    - cell "可行" [ref=e337]
+                  - row "开发 2 2 27 可行" [ref=e338]:
+                    - cell "开发" [ref=e339]
+                    - cell "2" [ref=e340]
+                    - cell "2" [ref=e341]
+                    - cell "27" [ref=e342]
+                    - cell "可行" [ref=e343]
+                  - row "生产 2 2 27 可行" [ref=e344]:
+                    - cell "生产" [ref=e345]
+                    - cell "2" [ref=e346]
+                    - cell "2" [ref=e347]
+                    - cell "27" [ref=e348]
+                    - cell "可行" [ref=e349]
+              - paragraph [ref=e350]: TP 张数必须整除 num_heads=32。单节点（≤8 卡）候选：[1, 2, 4, 8]。 跨节点 TP 候选：[16, 32]。 单节点放不下时尝试流水并行候选（TP8 × PP）：[24, 48, 64]。
+            - generic [ref=e351]:
+              - paragraph [ref=e352]: 启动命令
+              - generic [ref=e353]:
+                - generic [ref=e354]: vllm serve Qwen/Qwen3-30B-A3B \ --tensor-parallel-size 2 \ --max-model-len 40960 \ --max-num-seqs 27 \ --trust-remote-code \ --gpu-memory-utilization 0.9 \ --enable-expert-parallel
+                - button "复制启动命令" [ref=e355] [cursor=pointer]:
+                  - img [ref=e356]
+              - generic [ref=e360]:
+                - generic [ref=e361]: "--enable-expert-parallel"
+                - paragraph [ref=e362]: 启用 DP+EP，对 MoE all-to-all 通信更友好。
+          - generic [ref=e363]:
+            - paragraph [ref=e364]: Formula Reference
+            - generic [ref=e365]:
+              - group [ref=e366]:
+                - generic "Model Weights VRAM" [ref=e367] [cursor=pointer]
+                - generic [ref=e368]: "weights = safetensors_total_bytes observed = 61.07 GB draft/speculative extra = 0 cpu_offload_per_gpu = 0 MoE: all expert weights stay resident in VRAM."
+              - group [ref=e369]:
+                - generic "KV Cache VRAM" [ref=e370] [cursor=pointer]
+                - generic [ref=e371]: "standard: per_token_per_layer_bits = 2 * num_kv_heads * head_dim * 16 MLA: per_token_per_layer_bits = (kv_lora_rank + qk_rope_head_dim) * 16 effective_seq_len = sliding_window ? min(seq_len, sliding_window) : seq_len baseline = per_token_per_layer_bits * effective_seq_len * num_layers / 8 CSA+HCA: baseline * avg(1 / compress_ratio) NSA: baseline * min(nsa_topk / effective_seq_len, 1.0) paged_attention_factor = 0.75 selected = 3.02 GB"
+              - group [ref=e372]:
+                - generic "Activations" [ref=e373] [cursor=pointer]
+              - group [ref=e374]:
+                - generic "Required / GPU Fit" [ref=e375] [cursor=pointer]
+          - generic [ref=e376]:
+            - paragraph [ref=e378]: 推理过程
+            - generic [ref=e380]: "完整推导链（--explain） 下面每一项都给出所用公式、输入、每一步计算、主要来源。 Weight bytes (safetensors file sum) 公式: sum(file.size for file in model_source.file_metadata if file.endswith('.safetensors')) 输入: model source API = source=builtin, sha=ad44e777bcd18fa416d9da3bd8f70d33ebb85d39 [verified] 计算步骤: Raw value from API = 61,066,575,648 bytes = 61.07 GB 结果: 61,066,575,648 bytes [verified] 来源: sum of safetensors siblings from model_info API 延伸阅读: docs/methodology.md#weight-bytes Quantization scheme (reconciliation) 公式: best_match = argmin_scheme |observed_bytes - scheme.bpp x total_params| 输入: observed_bytes = 61,066,575,648 [verified] total_params = 30,532,108,288 [estimated] (from architecture formula - see '#params-estimate' entry below) 计算步骤: For each known quantization scheme, predict total bytes = bpp x params: FP16 predicted=61.06 GB error=0.0% BF16 predicted=61.06 GB error=0.0% FP8 predicted=30.53 GB error=100.0% INT8 predicted=30.53 GB error=100.0% FP4_FP8_MIXED predicted=16.79 GB error=263.7% GPTQ_INT4 predicted=16.79 GB error=263.7% Winner: FP16 at 0.0% error 结果: BF16 [verified] 来源: Nearest-anchor match against known bytes-per-param values 延伸阅读: docs/methodology.md#quantization-scheme KV cache @ 40K context 公式: per_tok_per_layer_bits = 2 x num_kv_heads x head_dim x dtype_bits (standard attention) apply_paged_attention: raw_kv x 0.75 输入: num_kv_heads = 4 [verified] head_dim = 128 [verified] dtype_bits = 16 [user-set] (2B) seq_len = 40,960 [verified] num_layers = 48 [verified] 计算步骤: effective_seq_len = seq_len = 40,960 per_tok_per_layer = 2,048 bytes baseline = per_tok_per_layer x effective_seq_len x num_layers = 4,026,531,840 bytes raw_kv = baseline = 4,026,531,840 bytes paged_attention_factor = 0.75 result = raw_kv x paged_attention_factor = 3,019,898,880 bytes 结果: 3,019,898,880 bytes = 3.02 GB [estimated] 来源: DeepSeek-V2 paper (MLA); DeepSeek-V4 tech report (CSA+HCA/NSA); vLLM PagedAttention; standard attention formula per Attention Is All You Need (Vaswani 2017) 延伸阅读: docs/methodology.md#kv-cache-per-request Fleet tier: dev (2 GPUs) 公式: required_per_gpu = max(decode_required, prefill_required) 输入: total_weight_bytes = 61,066,575,648 [verified] valid_TP_sizes = [1, 2, 4, 8] [estimated] (divisors of num_attention_heads capped at 8 (single node)) selected_layout = TP2 [estimated] tier_concurrent_requests = 8 [estimated] GPU memory_gb = 80 GB [verified] 计算步骤: per-GPU HBM usable (HBM - reserve) = 72,000,000,000 bytes; reserve = 8,000,000,000 bytes parallel layout = TP2 resident weight per GPU = 30,533,287,824 bytes activation working set per GPU = 8,650,752 bytes tier concurrency = 8 requests total model weight bytes = 61,066,575,648 (observed safetensors), allocated over 2 GPUs per-GPU KV @ 40K = total_KV / effective_kv_shards = 3,019,898,880 / 2 = 1,509,949,440 bytes concurrent_KV = 8 x 1,509,949,440 = 12,079,595,520 bytes decode_required = resident_weight + activation_working_set + concurrent_KV = 42,621,534,096 bytes prefill_peak_activation per GPU = 6,336,000 bytes prefill_required = resident_weight + prefill_peak_activation + concurrent_KV = 42,619,219,344 bytes required_per_gpu = max(decode_required, prefill_required) = 42,621,534,096 bytes; usable_per_gpu = 72,000,000,000 bytes selected smallest candidate satisfying required_per_gpu <= usable_per_gpu: 2 GPUs (TP2) 结果: 2 GPUs, required_per_gpu=42,621,534,096 bytes, fit=true 来源: vLLM GPU memory profiling reserves weights, peak activation, and KV cache inside gpu_memory_utilization; SGLang memory pool similarly budgets static weights plus KV cache 延伸阅读: docs/methodology.md#tppp-aware-kv-sharding"
+  - contentinfo [ref=e381]:
+    - paragraph [ref=e382]: Estimates are physics-based approximations. Real-world performance varies by framework, driver version, and system memory bandwidth.
+    - link "xrwang8/llm-infer-cal" [ref=e383] [cursor=pointer]:
+      - /url: https://github.com/xrwang8/llm-infer-cal
+      - img [ref=e384]
+      - text: xrwang8/llm-infer-cal
+```

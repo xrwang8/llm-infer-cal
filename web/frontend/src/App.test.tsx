@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { App, isReportCurrent, memoryExplainText, totalRequiredBytes } from './App';
+import { App, defaultSpeculativeFormPatch, isReportCurrent, memoryExplainText, totalRequiredBytes } from './App';
 
 describe('App shell', () => {
   it('does not render header status metrics', () => {
@@ -63,6 +63,16 @@ describe('App shell', () => {
     expect(html).toContain('Reduces KV cache overhead by ~25%');
     expect(html).not.toContain('Draft/EAGLE 模型 ID');
     expect(html).not.toContain('Speculative 额外权重 GiB');
+  });
+
+  it('defaults newly enabled speculative decoding to MTP without a draft model', () => {
+    expect(defaultSpeculativeFormPatch(4)).toEqual({
+      speculative_enabled: true,
+      speculative_mode: 'mtp',
+      speculative_num_draft_tokens: '4',
+      speculative_draft_model_id: '',
+      speculative_extra_weight_gb: '0.3',
+    });
   });
 
   it('renders only the core VRAM summary cards', () => {
