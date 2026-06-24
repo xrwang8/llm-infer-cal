@@ -5,7 +5,9 @@ export type FleetOption = {
   node_count?: number;
   tensor_parallel_size?: number;
   pipeline_parallel_size?: number;
+  main_weight_bytes_before_offload_per_gpu?: number;
   main_weight_bytes_per_gpu?: number;
+  expert_offload_bytes_per_gpu?: number;
   speculative_weight_bytes_per_gpu?: number;
   cpu_offload_bytes_per_gpu?: number;
   weight_bytes_per_gpu?: number;
@@ -85,9 +87,15 @@ export type Report = {
     kv_cache_bits?: number;
     paged_attention?: boolean;
     target_concurrent_requests?: number | null;
+    speculative_enabled?: boolean;
+    speculative_mode?: SpeculativeMode;
+    speculative_num_draft_tokens?: number | null;
     speculative_draft_model_id?: string | null;
     speculative_extra_weight_bytes?: Annotated<number>;
     cpu_offload_bytes_per_gpu?: number;
+    expert_offloading?: boolean;
+    experts_on_gpu?: number | null;
+    expert_offload_bytes_per_gpu?: number;
   };
   engine_compatibility?: Record<string, any> | null;
   hardware?: GpuSummary | null;
@@ -125,15 +133,22 @@ export type EvaluateForm = {
   concurrency_degradation: string;
   kv_cache_bits: string;
   paged_attention: boolean;
+  speculative_enabled: boolean;
+  speculative_mode: SpeculativeMode;
+  speculative_num_draft_tokens: string;
   target_concurrent_requests: string;
   speculative_draft_model_id: string;
   speculative_extra_weight_gb: string;
+  expert_offloading: boolean;
+  experts_on_gpu: string;
   cpu_offload_gb: string;
   llm_review: boolean;
   llm_review_api_key: string;
   llm_review_base_url: string;
   llm_review_model: string;
 };
+
+export type SpeculativeMode = 'standard' | 'mtp';
 
 export type Group<T> = {
   label: string;
@@ -412,6 +427,23 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     return trimmed || undefined;
   };
 
+  const speculativeDetails =
+    form.speculative_enabled
+      ? {
+          speculative_mode: form.speculative_mode,
+          speculative_num_draft_tokens: numberOrUndefined(form.speculative_num_draft_tokens),
+          ...(form.speculative_mode === 'standard'
+            ? { speculative_draft_model_id: stringOrUndefined(form.speculative_draft_model_id) }
+            : {}),
+          speculative_extra_weight_gb: numberOrUndefined(form.speculative_extra_weight_gb),
+        }
+      : {};
+  const expertDetails = form.expert_offloading
+    ? {
+        experts_on_gpu: numberOrUndefined(form.experts_on_gpu),
+      }
+    : {};
+
   return {
     model_id: form.model_id.trim(),
     source: form.source,
@@ -429,8 +461,10 @@ export function buildEvaluatePayload(form: EvaluateForm) {
     kv_cache_bits: numberOrUndefined(form.kv_cache_bits),
     paged_attention: form.paged_attention,
     target_concurrent_requests: numberOrUndefined(form.target_concurrent_requests),
-    speculative_draft_model_id: stringOrUndefined(form.speculative_draft_model_id),
-    speculative_extra_weight_gb: numberOrUndefined(form.speculative_extra_weight_gb),
+    speculative_enabled: form.speculative_enabled,
+    ...speculativeDetails,
+    expert_offloading: form.expert_offloading,
+    ...expertDetails,
     cpu_offload_gb: numberOrUndefined(form.cpu_offload_gb),
     explain: true,
     llm_review: form.llm_review,

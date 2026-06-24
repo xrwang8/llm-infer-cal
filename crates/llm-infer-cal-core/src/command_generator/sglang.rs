@@ -15,6 +15,31 @@ pub fn generate_sglang_command(
     cpu_offload_gb: Option<f64>,
     speculative_draft_model_id: Option<&str>,
 ) -> String {
+    generate_sglang_command_with_speculative_tokens(
+        model_id,
+        profile,
+        parallelism,
+        entry,
+        max_model_len,
+        max_concurrent_requests,
+        cpu_offload_gb,
+        speculative_draft_model_id,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn generate_sglang_command_with_speculative_tokens(
+    model_id: &str,
+    profile: &ArchitectureProfile,
+    parallelism: Parallelism,
+    entry: Option<&EngineCompatEntry>,
+    max_model_len: Option<u64>,
+    max_concurrent_requests: Option<u64>,
+    cpu_offload_gb: Option<f64>,
+    speculative_draft_model_id: Option<&str>,
+    speculative_num_draft_tokens: Option<u64>,
+) -> String {
     let launch = match entry {
         Some(entry) if !entry.env.is_empty() => {
             let prefix = entry
@@ -67,6 +92,7 @@ pub fn generate_sglang_command(
         }
     }
     if let Some(draft_model_id) = nonempty(speculative_draft_model_id) {
+        let num_draft_tokens = speculative_num_draft_tokens.unwrap_or(7).max(1);
         if !entry_has_flag(entry, "--speculative-algorithm") {
             lines.push("  --speculative-algorithm STANDALONE".to_string());
         }
@@ -80,7 +106,9 @@ pub fn generate_sglang_command(
             lines.push("  --speculative-eagle-topk 2".to_string());
         }
         if !entry_has_flag(entry, "--speculative-num-draft-tokens") {
-            lines.push("  --speculative-num-draft-tokens 7".to_string());
+            lines.push(format!(
+                "  --speculative-num-draft-tokens {num_draft_tokens}"
+            ));
         }
     }
 

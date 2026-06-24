@@ -8,7 +8,7 @@ use llm_infer_cal_core::{
     common::i18n::set_locale,
     core::{
         cache::ArtifactCache,
-        evaluator::{EvaluationOptions, Evaluator},
+        evaluator::{EvaluationOptions, Evaluator, SpeculativeMode},
         explain::build as build_explain,
     },
     hardware::loader::load_database,
@@ -157,16 +157,48 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
             "target_concurrent_requests must be greater than 0",
         ));
     }
-    let speculative_extra_weight_bytes = memory_bytes_from_request(
-        req.speculative_extra_weight_bytes,
-        req.speculative_extra_weight_gb,
-        "speculative_extra_weight_gb",
-    )?;
+    if matches!(req.speculative_num_draft_tokens, Some(0)) {
+        return Err(ApiError::bad_request(
+            "speculative_num_draft_tokens must be greater than 0",
+        ));
+    }
+    if matches!(req.experts_on_gpu, Some(0)) {
+        return Err(ApiError::bad_request(
+            "experts_on_gpu must be greater than 0",
+        ));
+    }
+    let speculative_enabled = req
+        .speculative_enabled
+        .unwrap_or_else(|| request_has_speculative_options(&req));
+    let speculative_mode = if speculative_enabled {
+        speculative_mode_from_request(req.speculative_mode.as_deref())?
+    } else {
+        SpeculativeMode::Standard
+    };
+    let speculative_extra_weight_bytes = if speculative_enabled {
+        memory_bytes_from_request(
+            req.speculative_extra_weight_bytes,
+            req.speculative_extra_weight_gb,
+            "speculative_extra_weight_gb",
+        )?
+    } else {
+        0
+    };
     let cpu_offload_bytes_per_gpu = memory_bytes_from_request(
         req.cpu_offload_bytes_per_gpu,
         req.cpu_offload_gb,
         "cpu_offload_gb",
     )?;
+    let expert_offloading = req
+        .expert_offloading
+        .unwrap_or(req.experts_on_gpu.is_some());
+    let experts_on_gpu = if expert_offloading {
+        Some(req.experts_on_gpu.ok_or_else(|| {
+            ApiError::bad_request("experts_on_gpu is required when expert_offloading is enabled")
+        })?)
+    } else {
+        None
+    };
 
     let source_name = req.source.as_deref().unwrap_or("builtin");
     let source = source_from_name(source_name, timeout_s).map_err(ApiError::bad_request)?;
@@ -191,14 +223,25 @@ async fn evaluate(Json(req): Json<EvaluateRequest>) -> Result<Json<Value>, ApiEr
         kv_cache_bits: req.kv_cache_bits.unwrap_or(defaults.kv_cache_bits),
         paged_attention: req.paged_attention.unwrap_or(defaults.paged_attention),
         target_concurrent_requests: req.target_concurrent_requests,
-        speculative_draft_model_id: req
-            .speculative_draft_model_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string),
+        speculative_enabled,
+        speculative_mode,
+        speculative_num_draft_tokens: speculative_enabled
+            .then_some(req.speculative_num_draft_tokens)
+            .flatten(),
+        speculative_draft_model_id: speculative_enabled
+            .then(|| {
+                req.speculative_draft_model_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .flatten()
+            .filter(|_| speculative_mode == SpeculativeMode::Standard),
         speculative_extra_weight_bytes,
         cpu_offload_bytes_per_gpu,
+        expert_offloading,
+        experts_on_gpu,
     };
 
     let reports = gpu_ids
@@ -260,6 +303,34 @@ fn memory_bytes_from_request(
         gib.map(|value| (value * 1024.0 * 1024.0 * 1024.0).round() as u64)
             .unwrap_or(0)
     }))
+}
+
+fn request_has_speculative_options(req: &EvaluateRequest) -> bool {
+    req.speculative_draft_model_id
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        || req
+            .speculative_extra_weight_bytes
+            .is_some_and(|value| value > 0)
+        || req
+            .speculative_extra_weight_gb
+            .is_some_and(|value| value != 0.0)
+}
+
+fn speculative_mode_from_request(value: Option<&str>) -> Result<SpeculativeMode, ApiError> {
+    match value
+        .unwrap_or("standard")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "" | "standard" => Ok(SpeculativeMode::Standard),
+        "mtp" => Ok(SpeculativeMode::Mtp),
+        other => Err(ApiError::bad_request(format!(
+            "speculative_mode must be standard or mtp, got '{other}'"
+        ))),
+    }
 }
 
 fn requested_gpus(req: &EvaluateRequest) -> Result<Vec<String>, ApiError> {
@@ -331,11 +402,16 @@ struct EvaluateRequest {
     kv_cache_bits: Option<u64>,
     paged_attention: Option<bool>,
     target_concurrent_requests: Option<u64>,
+    speculative_enabled: Option<bool>,
+    speculative_mode: Option<String>,
+    speculative_num_draft_tokens: Option<u64>,
     speculative_draft_model_id: Option<String>,
     speculative_extra_weight_bytes: Option<u64>,
     speculative_extra_weight_gb: Option<f64>,
     cpu_offload_bytes_per_gpu: Option<u64>,
     cpu_offload_gb: Option<f64>,
+    expert_offloading: Option<bool>,
+    experts_on_gpu: Option<u64>,
     explain: Option<bool>,
     llm_review: Option<bool>,
     llm_review_api_key: Option<String>,
@@ -513,11 +589,16 @@ mod tests {
             kv_cache_bits: None,
             paged_attention: None,
             target_concurrent_requests: None,
+            speculative_enabled: None,
+            speculative_mode: None,
+            speculative_num_draft_tokens: None,
             speculative_draft_model_id: None,
             speculative_extra_weight_bytes: None,
             speculative_extra_weight_gb: None,
             cpu_offload_bytes_per_gpu: None,
             cpu_offload_gb: None,
+            expert_offloading: None,
+            experts_on_gpu: None,
             explain: None,
             llm_review: Some(true),
             llm_review_api_key: api_key.map(ToOwned::to_owned),

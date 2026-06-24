@@ -5,8 +5,8 @@ use crate::architecture::formulas::activation::{compute_activation_bytes, DEFAUL
 use crate::architecture::formulas::kv_cache::compute_kv_cache_bits;
 use crate::architecture::formulas::weight::{estimate_active_params, estimate_total_params};
 use crate::architecture::profile::ArchitectureProfile;
-use crate::command_generator::sglang::generate_sglang_command;
-use crate::command_generator::vllm::generate_vllm_command;
+use crate::command_generator::sglang::generate_sglang_command_with_speculative_tokens;
+use crate::command_generator::vllm::generate_vllm_command_with_speculative_tokens;
 use crate::command_generator::Parallelism;
 use crate::core::cache::{ArtifactCache, CacheKey};
 use crate::engine_compat::loader::find_match;
@@ -45,9 +45,29 @@ pub struct EvaluationOptions {
     pub kv_cache_bits: u64,
     pub paged_attention: bool,
     pub target_concurrent_requests: Option<u64>,
+    pub speculative_enabled: bool,
+    pub speculative_mode: SpeculativeMode,
+    pub speculative_num_draft_tokens: Option<u64>,
     pub speculative_draft_model_id: Option<String>,
     pub speculative_extra_weight_bytes: u64,
     pub cpu_offload_bytes_per_gpu: u64,
+    pub expert_offloading: bool,
+    pub experts_on_gpu: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SpeculativeMode {
+    Standard,
+    Mtp,
+}
+
+impl SpeculativeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Mtp => "mtp",
+        }
+    }
 }
 
 impl Default for EvaluationOptions {
@@ -65,9 +85,14 @@ impl Default for EvaluationOptions {
             kv_cache_bits: 16,
             paged_attention: false,
             target_concurrent_requests: None,
+            speculative_enabled: false,
+            speculative_mode: SpeculativeMode::Standard,
+            speculative_num_draft_tokens: None,
             speculative_draft_model_id: None,
             speculative_extra_weight_bytes: 0,
             cpu_offload_bytes_per_gpu: 0,
+            expert_offloading: false,
+            experts_on_gpu: None,
         }
     }
 }
@@ -93,6 +118,12 @@ pub struct EvaluationReport {
     pub activation_by_context: BTreeMap<u64, AnnotatedValue<u64>>,
     pub kv_cache_bits: u64,
     pub paged_attention: bool,
+    pub speculative_enabled: bool,
+    pub speculative_mode: SpeculativeMode,
+    pub speculative_num_draft_tokens: Option<u64>,
+    pub expert_offloading: bool,
+    pub experts_on_gpu: Option<u64>,
+    pub expert_offload_bytes_per_gpu: u64,
     pub engine_match: Option<EngineCompatEntry>,
     pub fleet: Option<FleetRecommendation>,
     pub generated_command: Option<String>,
@@ -137,6 +168,26 @@ impl Evaluator {
     ) -> Result<EvaluationReport, ModelSourceError> {
         let artifact = self.fetch(model_id, options.refresh)?;
         let profile = detect(&artifact.config);
+        let requested_draft_model_id = options
+            .speculative_draft_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+        let speculative_enabled = options.speculative_enabled
+            || requested_draft_model_id.is_some()
+            || options.speculative_extra_weight_bytes > 0;
+        let speculative_mode = if speculative_enabled {
+            options.speculative_mode
+        } else {
+            SpeculativeMode::Standard
+        };
+        let speculative_draft_model_id =
+            if speculative_enabled && speculative_mode == SpeculativeMode::Standard {
+                requested_draft_model_id
+            } else {
+                None
+            };
 
         let total_params_estimate = estimate_total_params(&profile);
         let active_params_estimate = estimate_active_params(&profile);
@@ -163,8 +214,12 @@ impl Evaluator {
             if total_params > 0 { total_params } else { 1 },
             fingerprint.as_ref(),
         );
-        let speculative_weight_bytes =
-            self.resolve_speculative_weight_bytes(&options, options.refresh)?;
+        let speculative_weight_bytes = self.resolve_speculative_weight_bytes(
+            speculative_enabled,
+            speculative_draft_model_id.as_deref(),
+            options.speculative_extra_weight_bytes,
+            options.refresh,
+        )?;
 
         let contexts_to_report = select_context_lengths(&profile, options.context_length);
         let kv_cache_by_context = contexts_to_report
@@ -235,6 +290,8 @@ impl Evaluator {
                         target_concurrent_requests: options.target_concurrent_requests,
                         speculative_weight_bytes: speculative_weight_bytes.value,
                         cpu_offload_bytes_per_gpu: options.cpu_offload_bytes_per_gpu,
+                        expert_offloading: options.expert_offloading,
+                        experts_on_gpu: options.experts_on_gpu,
                     },
                 );
                 if let Some(chosen_option) = recommendation.best_option() {
@@ -252,7 +309,10 @@ impl Evaluator {
                         engine_match.as_ref(),
                         options.context_length,
                         command_concurrency,
-                        options.speculative_draft_model_id.as_deref(),
+                        speculative_draft_model_id.as_deref(),
+                        speculative_enabled
+                            .then_some(options.speculative_num_draft_tokens)
+                            .flatten(),
                     ));
                 }
                 fleet = Some(recommendation);
@@ -316,6 +376,15 @@ impl Evaluator {
         }
 
         let has_fleet = fleet.is_some();
+        let expert_offload_bytes_per_gpu = fleet
+            .as_ref()
+            .and_then(|recommendation| {
+                recommendation
+                    .best_option()
+                    .or_else(|| recommendation.options.first())
+                    .map(|option| option.expert_offload_bytes_per_gpu)
+            })
+            .unwrap_or(0);
         Ok(EvaluationReport {
             model_id: model_id.to_string(),
             source: artifact.source,
@@ -329,13 +398,21 @@ impl Evaluator {
             total_params_estimate,
             active_params_estimate,
             speculative_weight_bytes,
-            speculative_draft_model_id: options.speculative_draft_model_id,
+            speculative_draft_model_id,
             cpu_offload_bytes_per_gpu: options.cpu_offload_bytes_per_gpu,
             reconciliation,
             kv_cache_by_context,
             activation_by_context,
             kv_cache_bits: options.kv_cache_bits,
             paged_attention: options.paged_attention,
+            speculative_enabled,
+            speculative_mode,
+            speculative_num_draft_tokens: speculative_enabled
+                .then_some(options.speculative_num_draft_tokens)
+                .flatten(),
+            expert_offloading: options.expert_offloading,
+            experts_on_gpu: options.experts_on_gpu,
+            expert_offload_bytes_per_gpu,
             engine_match,
             fleet,
             generated_command,
@@ -364,16 +441,20 @@ impl Evaluator {
 
     fn resolve_speculative_weight_bytes(
         &self,
-        options: &EvaluationOptions,
+        enabled: bool,
+        draft_model_id: Option<&str>,
+        explicit: u64,
         refresh: bool,
     ) -> Result<AnnotatedValue<u64>, ModelSourceError> {
-        let explicit = options.speculative_extra_weight_bytes;
-        let Some(draft_model_id) = options
-            .speculative_draft_model_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-        else {
+        if !enabled {
+            return Ok(AnnotatedValue::new(
+                0,
+                Label::Verified,
+                Some("speculative decoding disabled"),
+            ));
+        }
+
+        let Some(draft_model_id) = draft_model_id.map(str::trim).filter(|id| !id.is_empty()) else {
             return Ok(if explicit > 0 {
                 AnnotatedValue::new(
                     explicit,
@@ -519,6 +600,7 @@ fn generate_command(
     max_model_len: Option<u64>,
     max_concurrent_requests: Option<u64>,
     speculative_draft_model_id: Option<&str>,
+    speculative_num_draft_tokens: Option<u64>,
 ) -> String {
     let parallelism = Parallelism {
         total_gpus: option.gpu_count,
@@ -531,7 +613,7 @@ fn generate_command(
     let cpu_offload_gb = (option.cpu_offload_bytes_per_gpu > 0)
         .then_some(option.cpu_offload_bytes_per_gpu as f64 / 1024.0 / 1024.0 / 1024.0);
     if engine.trim().eq_ignore_ascii_case("sglang") {
-        generate_sglang_command(
+        generate_sglang_command_with_speculative_tokens(
             model_id,
             profile,
             parallelism,
@@ -540,9 +622,10 @@ fn generate_command(
             max_concurrent_requests,
             cpu_offload_gb,
             speculative_draft_model_id,
+            speculative_num_draft_tokens,
         )
     } else {
-        generate_vllm_command(
+        generate_vllm_command_with_speculative_tokens(
             model_id,
             profile,
             parallelism,
@@ -551,6 +634,7 @@ fn generate_command(
             max_concurrent_requests,
             cpu_offload_gb,
             speculative_draft_model_id,
+            speculative_num_draft_tokens,
         )
     }
 }

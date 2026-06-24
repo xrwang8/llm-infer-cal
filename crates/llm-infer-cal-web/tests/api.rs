@@ -196,6 +196,9 @@ async fn evaluate_endpoint_includes_draft_model_in_generated_command() {
         "gpu": "H100",
         "engine": "vllm",
         "target_concurrent_requests": 2,
+        "speculative_enabled": true,
+        "speculative_mode": "standard",
+        "speculative_num_draft_tokens": 9,
         "speculative_draft_model_id": "Qwen/Qwen3-0.6B"
     });
 
@@ -217,6 +220,150 @@ async fn evaluate_endpoint_includes_draft_model_in_generated_command() {
     assert!(command.contains("--max-num-seqs 2"));
     assert!(command.contains("--speculative-config"));
     assert!(command.contains("\"model\":\"Qwen/Qwen3-0.6B\""));
+    assert!(command.contains("\"num_speculative_tokens\":9"));
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_echoes_mtp_speculative_mode_without_draft_model() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "engine": "vllm",
+        "speculative_enabled": true,
+        "speculative_mode": "mtp",
+        "speculative_num_draft_tokens": 6,
+        "speculative_extra_weight_gb": 0.3
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    assert_eq!(body["inference_options"]["speculative_enabled"], true);
+    assert_eq!(body["inference_options"]["speculative_mode"], "mtp");
+    assert_eq!(body["inference_options"]["speculative_num_draft_tokens"], 6);
+    assert!(body["inference_options"]["speculative_draft_model_id"].is_null());
+    assert!(
+        body["generated_command"]["command"]
+            .as_str()
+            .unwrap()
+            .contains("--speculative-config")
+            == false
+    );
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_applies_expert_offload_to_moe_memory() {
+    let payload = json!({
+        "model_id": "Qwen/Qwen3-30B-A3B",
+        "source": "builtin",
+        "gpu": "H100",
+        "engine": "vllm",
+        "gpu_count": 1,
+        "expert_offloading": true,
+        "experts_on_gpu": 8
+    });
+
+    let response = llm_infer_cal_web::app()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/evaluate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_response(response).await;
+    let option = &body["fleet"]["options"][0];
+    assert_eq!(body["inference_options"]["expert_offloading"], true);
+    assert_eq!(body["inference_options"]["experts_on_gpu"], 8);
+    assert!(
+        body["inference_options"]["expert_offload_bytes_per_gpu"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(
+        option["expert_offload_bytes_per_gpu"],
+        body["inference_options"]["expert_offload_bytes_per_gpu"]
+    );
+    assert!(
+        option["main_weight_bytes_per_gpu"].as_u64().unwrap()
+            < option["main_weight_bytes_before_offload_per_gpu"]
+                .as_u64()
+                .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn evaluate_endpoint_rejects_invalid_user_optimization_parameters() {
+    let cases = [
+        (
+            json!({
+                "model_id": "Qwen/Qwen3-30B-A3B",
+                "source": "builtin",
+                "gpu": "H100",
+                "engine": "vllm",
+                "speculative_enabled": true,
+                "speculative_mode": "magic"
+            }),
+            "speculative_mode must be standard or mtp",
+        ),
+        (
+            json!({
+                "model_id": "Qwen/Qwen3-30B-A3B",
+                "source": "builtin",
+                "gpu": "H100",
+                "engine": "vllm",
+                "speculative_enabled": true,
+                "speculative_num_draft_tokens": 0
+            }),
+            "speculative_num_draft_tokens must be greater than 0",
+        ),
+        (
+            json!({
+                "model_id": "Qwen/Qwen3-30B-A3B",
+                "source": "builtin",
+                "gpu": "H100",
+                "engine": "vllm",
+                "expert_offloading": true
+            }),
+            "experts_on_gpu is required",
+        ),
+    ];
+
+    for (payload, message) in cases {
+        let response = llm_infer_cal_web::app()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/evaluate")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = json_response(response).await;
+        assert!(body["error"]["message"].as_str().unwrap().contains(message));
+    }
 }
 
 #[tokio::test]

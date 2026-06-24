@@ -6,7 +6,7 @@ use llm_infer_cal_core::architecture::profile::{
 use llm_infer_cal_core::benchmark::runner::{
     evaluate_field, exit_code_from, load_dataset, CheckResult, Expectation, ExpectedValue, Status,
 };
-use llm_infer_cal_core::core::evaluator::EvaluationReport;
+use llm_infer_cal_core::core::evaluator::{EvaluationReport, SpeculativeMode};
 use llm_infer_cal_core::fleet::planner::{FleetOption, FleetRecommendation};
 use llm_infer_cal_core::output::labels::{AnnotatedValue, Label};
 use llm_infer_cal_core::weight_analyzer::reconciler::ReconciliationReport;
@@ -75,6 +75,12 @@ fn fake_report(
         activation_by_context: BTreeMap::new(),
         kv_cache_bits: 16,
         paged_attention: false,
+        speculative_enabled: false,
+        speculative_mode: SpeculativeMode::Standard,
+        speculative_num_draft_tokens: None,
+        expert_offloading: false,
+        experts_on_gpu: None,
+        expert_offload_bytes_per_gpu: 0,
         engine_match: None,
         fleet,
         generated_command: None,
@@ -96,7 +102,9 @@ fn prod_fleet(gpu_count: u64) -> FleetRecommendation {
             tensor_parallel_size: gpu_count,
             pipeline_parallel_size: 1,
             node_count: 1,
+            main_weight_bytes_before_offload_per_gpu: 1,
             main_weight_bytes_per_gpu: 1,
+            expert_offload_bytes_per_gpu: 0,
             speculative_weight_bytes_per_gpu: 0,
             cpu_offload_bytes_per_gpu: 0,
             weight_bytes_per_gpu: 1,

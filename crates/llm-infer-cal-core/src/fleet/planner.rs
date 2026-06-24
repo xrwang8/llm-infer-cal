@@ -21,7 +21,9 @@ pub struct FleetOption {
     pub tensor_parallel_size: u64,
     pub pipeline_parallel_size: u64,
     pub node_count: u64,
+    pub main_weight_bytes_before_offload_per_gpu: u64,
     pub main_weight_bytes_per_gpu: u64,
+    pub expert_offload_bytes_per_gpu: u64,
     pub speculative_weight_bytes_per_gpu: u64,
     pub cpu_offload_bytes_per_gpu: u64,
     pub weight_bytes_per_gpu: u64,
@@ -49,6 +51,8 @@ pub struct FleetMemoryOptions {
     pub target_concurrent_requests: Option<u64>,
     pub speculative_weight_bytes: u64,
     pub cpu_offload_bytes_per_gpu: u64,
+    pub expert_offloading: bool,
+    pub experts_on_gpu: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -444,7 +448,9 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
         tensor_parallel_size,
         pipeline_parallel_size,
         node_count,
+        main_weight_bytes_before_offload_per_gpu: weight.main_before_offload,
         main_weight_bytes_per_gpu: weight.main,
+        expert_offload_bytes_per_gpu: weight.expert_offload,
         speculative_weight_bytes_per_gpu: weight.speculative,
         cpu_offload_bytes_per_gpu: weight.cpu_offload,
         weight_bytes_per_gpu: weight.total,
@@ -471,7 +477,9 @@ fn evaluate_count(gpu_count: u64, tier: &'static str, eval: &EvalContext<'_>) ->
 }
 
 struct ResidentWeight {
+    main_before_offload: u64,
     main: u64,
+    expert_offload: u64,
     speculative: u64,
     cpu_offload: u64,
     total: u64,
@@ -491,15 +499,68 @@ fn resident_weight_per_gpu(
     memory_options: FleetMemoryOptions,
 ) -> ResidentWeight {
     let base_main = resident_main_weight_per_gpu(profile, weight_bytes, gpu_count);
-    let cpu_offload = memory_options.cpu_offload_bytes_per_gpu.min(base_main);
-    let main = base_main.saturating_sub(cpu_offload);
+    let expert_limited_main = resident_main_weight_per_gpu_after_expert_offload(
+        profile,
+        weight_bytes,
+        gpu_count,
+        memory_options,
+    );
+    let expert_offload = base_main.saturating_sub(expert_limited_main);
+    let generic_cpu_offload = memory_options
+        .cpu_offload_bytes_per_gpu
+        .min(expert_limited_main);
+    let main = expert_limited_main.saturating_sub(generic_cpu_offload);
+    let cpu_offload = expert_offload + generic_cpu_offload;
     let speculative = ceil_div(memory_options.speculative_weight_bytes, gpu_count.max(1));
     ResidentWeight {
+        main_before_offload: base_main,
         main,
+        expert_offload,
         speculative,
         cpu_offload,
         total: main + speculative,
     }
+}
+
+fn resident_main_weight_per_gpu_after_expert_offload(
+    profile: &ArchitectureProfile,
+    weight_bytes: u64,
+    gpu_count: u64,
+    memory_options: FleetMemoryOptions,
+) -> u64 {
+    if !memory_options.expert_offloading {
+        return resident_main_weight_per_gpu(profile, weight_bytes, gpu_count);
+    }
+    let Some(moe) = &profile.moe else {
+        return resident_main_weight_per_gpu(profile, weight_bytes, gpu_count);
+    };
+    if weight_bytes == 0 || moe.num_routed_experts == 0 {
+        return resident_main_weight_per_gpu(profile, weight_bytes, gpu_count);
+    }
+
+    let experts_on_gpu = memory_options
+        .experts_on_gpu
+        .unwrap_or(moe.num_experts_per_tok.max(1))
+        .max(moe.num_experts_per_tok.max(1))
+        .min(moe.num_routed_experts);
+    if experts_on_gpu >= moe.num_routed_experts {
+        return resident_main_weight_per_gpu(profile, weight_bytes, gpu_count);
+    }
+
+    let (tp, pp, _) = layout_for_count(profile, gpu_count);
+    let pp = pp.max(1);
+    let tp = tp.max(1);
+    let stage_weight_bytes = ceil_div(weight_bytes, pp);
+    let routed_fraction = moe_routed_weight_fraction(profile);
+    let routed_bytes = (stage_weight_bytes as f64 * routed_fraction) as u64;
+    let static_bytes = stage_weight_bytes.saturating_sub(routed_bytes);
+    let kept_routed_bytes = saturating_u128_to_u64(ceil_div_u128(
+        routed_bytes as u128 * experts_on_gpu as u128,
+        moe.num_routed_experts as u128,
+    ));
+    let routed_shards = experts_on_gpu.max(1).min(tp);
+
+    ceil_div(kept_routed_bytes, routed_shards) + ceil_div(static_bytes, tp)
 }
 
 fn resident_main_weight_per_gpu(

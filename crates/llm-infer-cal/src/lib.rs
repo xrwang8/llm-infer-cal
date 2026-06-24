@@ -6,7 +6,7 @@ use llm_infer_cal_core::benchmark::runner::{
 };
 use llm_infer_cal_core::common::i18n::{detect_locale_from_env, get_locale, set_locale, t, t_with};
 use llm_infer_cal_core::core::cache::ArtifactCache;
-use llm_infer_cal_core::core::evaluator::{EvaluationOptions, Evaluator};
+use llm_infer_cal_core::core::evaluator::{EvaluationOptions, Evaluator, SpeculativeMode};
 use llm_infer_cal_core::core::explain::build as build_explain;
 use llm_infer_cal_core::hardware::loader::load_database;
 use llm_infer_cal_core::llm_review::reviewer::run_review;
@@ -336,6 +336,13 @@ where
         Err(message) => return CliExit::err(1, message),
     };
     let evaluator = Evaluator::new(source, ArtifactCache::with_default_ttl(None).ok());
+    let speculative_draft_model_id = cli
+        .speculative_draft_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let speculative_extra_weight_bytes = gib_to_bytes(cli.speculative_extra_weight_gb);
     let options = EvaluationOptions {
         gpu_count: cli.gpu_count,
         context_length: cli.context_length,
@@ -349,14 +356,15 @@ where
         kv_cache_bits: cli.kv_cache_bits,
         paged_attention: cli.paged_attention,
         target_concurrent_requests: cli.target_concurrency,
-        speculative_draft_model_id: cli
-            .speculative_draft_model
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string),
-        speculative_extra_weight_bytes: gib_to_bytes(cli.speculative_extra_weight_gb),
+        speculative_enabled: speculative_draft_model_id.is_some()
+            || speculative_extra_weight_bytes > 0,
+        speculative_mode: SpeculativeMode::Standard,
+        speculative_num_draft_tokens: None,
+        speculative_draft_model_id,
+        speculative_extra_weight_bytes,
         cpu_offload_bytes_per_gpu: gib_to_bytes(cli.cpu_offload_gb),
+        expert_offloading: false,
+        experts_on_gpu: None,
     };
 
     let report = match evaluator.evaluate(model_id, gpu, &cli.engine, options) {

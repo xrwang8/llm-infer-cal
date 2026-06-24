@@ -1,6 +1,10 @@
 use llm_infer_cal_core::architecture::profile::{ArchitectureProfile, PositionTraits};
-use llm_infer_cal_core::command_generator::sglang::generate_sglang_command;
-use llm_infer_cal_core::command_generator::vllm::generate_vllm_command;
+use llm_infer_cal_core::command_generator::sglang::{
+    generate_sglang_command, generate_sglang_command_with_speculative_tokens,
+};
+use llm_infer_cal_core::command_generator::vllm::{
+    generate_vllm_command, generate_vllm_command_with_speculative_tokens,
+};
 use llm_infer_cal_core::command_generator::Parallelism;
 use llm_infer_cal_core::engine_compat::{EngineCompatEntry, EngineFlag};
 
@@ -128,7 +132,7 @@ fn vllm_cpu_offload_gb_is_rendered_when_configured() {
 
 #[test]
 fn vllm_speculative_config_is_rendered_for_draft_model() {
-    let cmd = generate_vllm_command(
+    let cmd = generate_vllm_command_with_speculative_tokens(
         "Qwen/Qwen3.6-35B-A3B",
         &profile("qwen3_5_moe_text", Some(262_144)),
         Parallelism::single(8),
@@ -137,11 +141,12 @@ fn vllm_speculative_config_is_rendered_for_draft_model() {
         Some(12),
         None,
         Some("Qwen/Qwen2.5-1.5B-Instruct"),
+        Some(9),
     );
 
     assert!(cmd.contains("--speculative-config"));
     assert!(cmd.contains("\"model\":\"Qwen/Qwen2.5-1.5B-Instruct\""));
-    assert!(cmd.contains("\"num_speculative_tokens\":4"));
+    assert!(cmd.contains("\"num_speculative_tokens\":9"));
 }
 
 #[test]
@@ -250,7 +255,7 @@ fn sglang_cpu_offload_gb_is_rendered_when_configured() {
 
 #[test]
 fn sglang_speculative_flags_are_rendered_for_standalone_draft_model() {
-    let cmd = generate_sglang_command(
+    let cmd = generate_sglang_command_with_speculative_tokens(
         "Qwen/Qwen3.6-35B-A3B",
         &profile("qwen3_5_moe_text", Some(262_144)),
         Parallelism::single(8),
@@ -259,13 +264,14 @@ fn sglang_speculative_flags_are_rendered_for_standalone_draft_model() {
         Some(12),
         None,
         Some("Qwen/Qwen2.5-1.5B-Instruct"),
+        Some(11),
     );
 
     assert!(cmd.contains("--speculative-algorithm STANDALONE"));
     assert!(cmd.contains("--speculative-draft-model-path Qwen/Qwen2.5-1.5B-Instruct"));
     assert!(cmd.contains("--speculative-num-steps 4"));
     assert!(cmd.contains("--speculative-eagle-topk 2"));
-    assert!(cmd.contains("--speculative-num-draft-tokens 7"));
+    assert!(cmd.contains("--speculative-num-draft-tokens 11"));
 }
 
 #[test]

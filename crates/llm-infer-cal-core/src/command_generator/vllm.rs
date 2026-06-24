@@ -17,6 +17,31 @@ pub fn generate_vllm_command(
     cpu_offload_gb: Option<f64>,
     speculative_draft_model_id: Option<&str>,
 ) -> String {
+    generate_vllm_command_with_speculative_tokens(
+        model_id,
+        profile,
+        parallelism,
+        entry,
+        max_model_len,
+        max_concurrent_requests,
+        cpu_offload_gb,
+        speculative_draft_model_id,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn generate_vllm_command_with_speculative_tokens(
+    model_id: &str,
+    profile: &ArchitectureProfile,
+    parallelism: Parallelism,
+    entry: Option<&EngineCompatEntry>,
+    max_model_len: Option<u64>,
+    max_concurrent_requests: Option<u64>,
+    cpu_offload_gb: Option<f64>,
+    speculative_draft_model_id: Option<&str>,
+    speculative_num_draft_tokens: Option<u64>,
+) -> String {
     let mut lines = vec![
         format!("vllm serve {model_id}"),
         format!(
@@ -64,9 +89,10 @@ pub fn generate_vllm_command(
         if !entry_has_flag(entry, "--speculative-config")
             && !entry_has_flag(entry, "--speculative-model")
         {
+            let num_speculative_tokens = speculative_num_draft_tokens.unwrap_or(4).max(1);
             let config = json!({
                 "model": draft_model_id,
-                "num_speculative_tokens": 4
+                "num_speculative_tokens": num_speculative_tokens
             });
             lines.push(format!(
                 "  --speculative-config {}",

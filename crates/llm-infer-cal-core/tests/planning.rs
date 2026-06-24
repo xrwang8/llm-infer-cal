@@ -421,6 +421,54 @@ fn fleet_planner_does_not_over_shard_moe_experts_beyond_expert_count() {
 }
 
 #[test]
+fn fleet_planner_applies_moe_expert_offload_to_resident_weight() {
+    let h100 = lookup("H100").unwrap();
+    let profile = tiny_moe_few_experts_profile();
+    let baseline = plan_with_memory_options(
+        &profile,
+        80_000_000_000,
+        1_000_000_000,
+        0,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 1_000_000_000)],
+        &[(131_072, 0)],
+        FleetMemoryOptions::default(),
+    );
+    let offloaded = plan_with_memory_options(
+        &profile,
+        80_000_000_000,
+        1_000_000_000,
+        0,
+        131_072,
+        &h100,
+        Some(1),
+        &[(131_072, 1_000_000_000)],
+        &[(131_072, 0)],
+        FleetMemoryOptions {
+            expert_offloading: true,
+            experts_on_gpu: Some(2),
+            ..FleetMemoryOptions::default()
+        },
+    );
+
+    let baseline_option = &baseline.options[0];
+    let offloaded_option = &offloaded.options[0];
+
+    assert!(offloaded_option.main_weight_bytes_per_gpu < baseline_option.main_weight_bytes_per_gpu);
+    assert!(offloaded_option.expert_offload_bytes_per_gpu > 0);
+    assert_eq!(
+        offloaded_option.main_weight_bytes_per_gpu + offloaded_option.expert_offload_bytes_per_gpu,
+        baseline_option.main_weight_bytes_per_gpu
+    );
+    assert_eq!(
+        offloaded_option.cpu_offload_bytes_per_gpu,
+        offloaded_option.expert_offload_bytes_per_gpu
+    );
+}
+
+#[test]
 fn fleet_planner_applies_target_concurrency_speculative_weights_and_cpu_offload() {
     let h100 = lookup("H100").unwrap();
     let rec = plan_with_memory_options(
@@ -437,6 +485,7 @@ fn fleet_planner_applies_target_concurrency_speculative_weights_and_cpu_offload(
             target_concurrent_requests: Some(3),
             speculative_weight_bytes: 2_000_000_000,
             cpu_offload_bytes_per_gpu: 4_000_000_000,
+            ..FleetMemoryOptions::default()
         },
     );
 

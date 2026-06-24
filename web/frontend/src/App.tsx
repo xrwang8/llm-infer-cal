@@ -65,9 +65,14 @@ const DEFAULT_FORM: EvaluateForm = {
   concurrency_degradation: '1',
   kv_cache_bits: '16',
   paged_attention: true,
+  speculative_enabled: false,
+  speculative_mode: 'standard',
+  speculative_num_draft_tokens: '4',
   target_concurrent_requests: '',
   speculative_draft_model_id: '',
   speculative_extra_weight_gb: '',
+  expert_offloading: false,
+  experts_on_gpu: '',
   cpu_offload_gb: '',
   llm_review: false,
   llm_review_api_key: '',
@@ -194,6 +199,7 @@ export function App() {
   const isMoe = !!moeTraits || (!!params && !!activeParams && activeParams < params);
   const totalExperts = Number(moeTraits?.routed_experts ?? moeTraits?.num_routed_experts ?? 8);
   const activeExperts = Number(moeTraits?.experts_per_token ?? moeTraits?.num_experts_per_tok ?? 1);
+  const requiresDraftModel = form.speculative_enabled && form.speculative_mode === 'standard' && !form.speculative_draft_model_id.trim();
   const supportsMtpMode = supportsMtp(form.model_id);
   const compareGpuIds = useMemo(() => {
     const filtered = gpus.filter((gpu) => {
@@ -207,9 +213,14 @@ export function App() {
   useEffect(() => {
     if (!isMoe) {
       setExpertOffloading(false);
+      setForm((current) => ({ ...current, expert_offloading: false, experts_on_gpu: '' }));
       return;
     }
-    setNumGpuExperts((current) => Math.max(activeExperts || 1, Math.min(current || activeExperts || 1, totalExperts || current || 8)));
+    setNumGpuExperts((current) => {
+      const next = Math.max(activeExperts || 1, Math.min(current || activeExperts || 1, totalExperts || current || 8));
+      setForm((formState) => (formState.expert_offloading ? { ...formState, experts_on_gpu: String(next) } : formState));
+      return next;
+    });
   }, [isMoe, activeExperts, totalExperts]);
 
   async function runEvaluation(nextForm = form) {
@@ -266,14 +277,23 @@ export function App() {
   function updateSpeculativeEnabled(enabled: boolean) {
     setSpeculativeEnabled(enabled);
     if (!enabled) {
-      setForm((current) => ({ ...current, speculative_draft_model_id: '', speculative_extra_weight_gb: '' }));
+      setForm((current) => ({
+        ...current,
+        speculative_enabled: false,
+        speculative_mode: 'standard',
+        speculative_num_draft_tokens: '4',
+        speculative_draft_model_id: '',
+        speculative_extra_weight_gb: '',
+      }));
       return;
     }
 
     setSpeculativeMode('standard');
     setForm((current) => ({
       ...current,
-      speculative_draft_model_id: '',
+      speculative_enabled: true,
+      speculative_mode: 'standard',
+      speculative_num_draft_tokens: String(specNumDraftTokens),
       speculative_extra_weight_gb: draftModelWeightGb(specDraftModelSize),
     }));
   }
@@ -283,7 +303,8 @@ export function App() {
     setForm((current) => {
       return {
         ...current,
-        speculative_draft_model_id: '',
+        speculative_mode: nextMode,
+        speculative_draft_model_id: nextMode === 'mtp' ? '' : current.speculative_draft_model_id,
         speculative_extra_weight_gb: nextMode === 'mtp' ? '0.3' : draftModelWeightGb(specDraftModelSize),
       };
     });
@@ -298,6 +319,22 @@ export function App() {
 
   function updateSpecNumDraftTokens(value: number) {
     setSpecNumDraftTokens(value);
+    setForm((current) => ({ ...current, speculative_num_draft_tokens: String(Math.round(value)) }));
+  }
+
+  function updateExpertOffloading(enabled: boolean) {
+    setExpertOffloading(enabled);
+    setForm((current) => ({
+      ...current,
+      expert_offloading: enabled,
+      experts_on_gpu: enabled ? String(Math.max(activeExperts || 1, Math.min(numGpuExperts || activeExperts || 1, totalExperts || numGpuExperts || 8))) : '',
+    }));
+  }
+
+  function updateExpertsOnGpu(value: number) {
+    const rounded = Math.round(value);
+    setNumGpuExperts(rounded);
+    setForm((current) => ({ ...current, experts_on_gpu: String(rounded) }));
   }
 
   function submit(event: FormEvent) {
@@ -566,6 +603,12 @@ export function App() {
                             unit="tokens"
                             markers={[2, 4, 8, 12, 16]}
                           />
+                          <TextField
+                            label="Draft Model ID"
+                            value={form.speculative_draft_model_id}
+                            placeholder="例如 Qwen/Qwen3-0.6B"
+                            onChange={(value) => updateField('speculative_draft_model_id', value)}
+                          />
                           <p>
                             Draft model adds ~{draftModelWeightGb(specDraftModelSize)} GiB VRAM.
                             Estimated speedup: {(1 + (specNumDraftTokens * 0.6) / 2).toFixed(1)}x at ~60% acceptance rate.
@@ -587,7 +630,7 @@ export function App() {
                         label="Expert Offloading"
                         description="Keep select experts on GPU, offload rest to CPU"
                         checked={expertOffloading}
-                        onChange={setExpertOffloading}
+                        onChange={updateExpertOffloading}
                       />
                       {expertOffloading ? (
                         <div className="expertBox">
@@ -597,7 +640,7 @@ export function App() {
                             max={Math.max(totalExperts, activeExperts)}
                             step={1}
                             value={Math.max(activeExperts, Math.min(numGpuExperts, totalExperts))}
-                            onValueChange={(value) => setNumGpuExperts(value)}
+                            onValueChange={updateExpertsOnGpu}
                             format={(value) => `${Math.round(value)} / ${Math.max(totalExperts, activeExperts)}`}
                             unit=""
                             markers={[Math.max(1, activeExperts), Math.max(totalExperts, activeExperts)]}
@@ -677,7 +720,7 @@ export function App() {
                   </details>
                 </ConfigSection>
 
-                <button className="primaryButton" type="submit" disabled={evaluating || !form.model_id.trim() || !selectedGpuIds.length}>
+                <button className="primaryButton" type="submit" disabled={evaluating || !form.model_id.trim() || !selectedGpuIds.length || requiresDraftModel}>
                   {evaluating ? <RefreshCcw className="spin" size={17} /> : <Play size={17} />}
                   <span>{evaluating ? '计算中' : '开始评估'}</span>
                 </button>
@@ -770,7 +813,7 @@ export function App() {
                 onTier={setCompareTier}
                 onGpuCount={setCompareGpuCount}
                 onRun={runComparison}
-                disabled={evaluating || !form.model_id.trim()}
+                disabled={evaluating || !form.model_id.trim() || requiresDraftModel}
               />
               <ComparisonTable reports={comparisonReports} />
             </div>
